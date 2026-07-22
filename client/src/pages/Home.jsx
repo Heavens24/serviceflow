@@ -3,6 +3,7 @@ import Hero from "../components/home/Hero";
 import SearchBar from "../components/home/SearchBar";
 import Categories from "../components/home/Categories";
 import FeaturedProviders from "../components/home/FeaturedProviders";
+import HowItWorks from "../components/home/HowItWorks";
 import Footer from "../components/layout/Footer";
 
 function Home() {
@@ -13,6 +14,7 @@ function Home() {
       <SearchBar />
       <Categories />
       <FeaturedProviders />
+      <HowItWorks />
       <Footer />
     </>
   );
