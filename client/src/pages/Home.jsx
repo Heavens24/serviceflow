@@ -2,6 +2,7 @@ import Navbar from "../components/layout/Navbar";
 import Hero from "../components/home/Hero";
 import SearchBar from "../components/home/SearchBar";
 import Categories from "../components/home/Categories";
+import FeaturedProviders from "../components/home/FeaturedProviders";
 import Footer from "../components/layout/Footer";
 
 function Home() {
@@ -11,6 +12,7 @@ function Home() {
       <Hero />
       <SearchBar />
       <Categories />
+      <FeaturedProviders />
       <Footer />
     </>
   );
