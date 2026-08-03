@@ -1,6 +1,38 @@
+import {
+  Search,
+  CalendarDays,
+  CircleCheckBig,
+} from "lucide-react";
+
 import howItWorks from "../../config/howItWorks";
 
 function HowItWorks() {
+  const icons = {
+    search: (
+      <Search
+        size={52}
+        className="text-blue-600"
+        strokeWidth={2.2}
+      />
+    ),
+
+    calendar: (
+      <CalendarDays
+        size={52}
+        className="text-blue-600"
+        strokeWidth={2.2}
+      />
+    ),
+
+    check: (
+      <CircleCheckBig
+        size={52}
+        className="text-green-600"
+        strokeWidth={2.2}
+      />
+    ),
+  };
+
   return (
     <section className="py-24 bg-slate-50">
       <div className="max-w-7xl mx-auto px-6">
@@ -20,10 +52,10 @@ function HowItWorks() {
           {howItWorks.map((item) => (
             <div
               key={item.id}
-              className="bg-white rounded-2xl shadow-md p-8 text-center hover:shadow-xl transition"
+              className="bg-white rounded-2xl shadow-md p-8 text-center hover:shadow-xl transition duration-300"
             >
-              <div className="text-5xl">
-                {item.icon}
+              <div className="flex justify-center">
+                {icons[item.icon]}
               </div>
 
               <div className="mt-6 text-blue-600 font-bold text-lg">

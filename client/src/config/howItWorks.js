@@ -5,7 +5,7 @@ const howItWorks = [
     title: "Search",
     description:
       "Search for trusted professionals by service and location.",
-    icon: "🔍",
+    icon: "search",
   },
   {
     id: 2,
@@ -13,7 +13,7 @@ const howItWorks = [
     title: "Book",
     description:
       "Choose a convenient date and time that works for you.",
-    icon: "📅",
+    icon: "calendar",
   },
   {
     id: 3,
@@ -21,7 +21,7 @@ const howItWorks = [
     title: "Relax",
     description:
       "Your professional arrives and gets the job done.",
-    icon: "✅",
+    icon: "check",
   },
 ];
 
