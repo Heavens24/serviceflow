@@ -5,6 +5,9 @@ from models.user import User
 from utils.password import hash_password, verify_password
 
 
+# ==========================
+# Register User
+# ==========================
 def register_user(data):
     full_name = data.get("full_name", "").strip()
     email = data.get("email", "").strip().lower()
@@ -51,9 +54,15 @@ def register_user(data):
     db.session.add(user)
     db.session.commit()
 
+    # Automatically create a JWT for the new user
+    access_token = create_access_token(
+        identity=str(user.id)
+    )
+
     return {
         "success": True,
         "message": "Registration successful.",
+        "access_token": access_token,
         "user": {
             "id": user.id,
             "full_name": user.full_name,
@@ -65,6 +74,9 @@ def register_user(data):
     }
 
 
+# ==========================
+# Login User
+# ==========================
 def login_user(data):
     email = data.get("email", "").strip().lower()
     password = data.get("password", "")
