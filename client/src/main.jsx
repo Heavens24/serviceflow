@@ -4,9 +4,20 @@ import { BrowserRouter } from "react-router-dom";
 
 import App from "./App";
 import { AuthProvider } from "./context/AuthContext";
-import "./styles/global.css";
 
-createRoot(document.getElementById("root")).render(
+import "./styles/global.css";
+import "./styles/theme.css";
+
+const rootElement =
+  document.getElementById("root");
+
+if (!rootElement) {
+  throw new Error(
+    "Unable to find the root element.",
+  );
+}
+
+createRoot(rootElement).render(
   <StrictMode>
     <BrowserRouter>
       <AuthProvider>
