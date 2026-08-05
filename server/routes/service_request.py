@@ -1,17 +1,22 @@
 from flask import Blueprint, request
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import (
+    get_jwt_identity,
+    jwt_required,
+)
 
 from services.service_request_service import (
-    create_service_request,
-    get_all_service_requests,
-    get_service_request,
     accept_service_request,
-    start_service_request,
     complete_service_request,
     confirm_service_request,
-    get_my_requests,
+    create_service_request,
+    get_all_service_requests,
+    get_marketplace_jobs,
     get_my_jobs,
+    get_my_requests,
+    get_service_request,
+    start_service_request,
 )
+
 
 service_request_bp = Blueprint(
     "service_requests",
@@ -20,10 +25,31 @@ service_request_bp = Blueprint(
 )
 
 
-@service_request_bp.route("/service-requests", methods=["POST"])
+def get_result_status(
+    result,
+    success_status=200,
+    failure_status=400,
+):
+    """
+    Return the service-provided status code when available.
+    """
+
+    if result.get("success"):
+        return success_status
+
+    return result.get("status_code", failure_status)
+
+
+# ==========================
+# Create Service Request
+# ==========================
+@service_request_bp.route(
+    "/service-requests",
+    methods=["POST"],
+)
 @jwt_required()
 def create_request():
-    data = request.get_json()
+    data = request.get_json(silent=True)
 
     if not data:
         return {
@@ -31,33 +57,95 @@ def create_request():
             "message": "Request body is required.",
         }, 400
 
-    customer_id = get_jwt_identity()
+    user_id = get_jwt_identity()
 
-    result = create_service_request(data, customer_id)
+    result = create_service_request(
+        data,
+        user_id,
+    )
 
-    status = 201 if result["success"] else 400
+    status = get_result_status(
+        result,
+        success_status=201,
+    )
 
     return result, status
 
 
-@service_request_bp.route("/service-requests", methods=["GET"])
+# ==========================
+# Get Accessible Requests
+# ==========================
+@service_request_bp.route(
+    "/service-requests",
+    methods=["GET"],
+)
 @jwt_required()
 def get_requests():
-    result = get_all_service_requests()
-    return result, 200
+    user_id = get_jwt_identity()
 
+    result = get_all_service_requests(
+        user_id,
+    )
 
-@service_request_bp.route("/service-requests/<int:request_id>", methods=["GET"])
-@jwt_required()
-def get_request(request_id):
-    result = get_service_request(request_id)
-
-    status = 200 if result["success"] else 404
+    status = get_result_status(result)
 
     return result, status
 
 
-@service_request_bp.route("/service-requests/<int:request_id>/accept", methods=["PUT"])
+# ==========================
+# Get Marketplace Jobs
+# ==========================
+@service_request_bp.route(
+    "/marketplace/jobs",
+    methods=["GET"],
+)
+@jwt_required()
+def marketplace_jobs():
+    artisan_id = get_jwt_identity()
+
+    result = get_marketplace_jobs(
+        artisan_id,
+    )
+
+    status = get_result_status(
+        result,
+        failure_status=403,
+    )
+
+    return result, status
+
+
+# ==========================
+# Get Single Service Request
+# ==========================
+@service_request_bp.route(
+    "/service-requests/<int:request_id>",
+    methods=["GET"],
+)
+@jwt_required()
+def get_request(request_id):
+    user_id = get_jwt_identity()
+
+    result = get_service_request(
+        request_id,
+        user_id,
+    )
+
+    status = get_result_status(
+        result,
+        failure_status=404,
+    )
+
+    return result, status
+
+
+# ==========================
+# Accept Service Request
+# ==========================
+@service_request_bp.route(
+    "/service-requests/<int:request_id>/accept",
+    methods=["PUT"],
+)
 @jwt_required()
 def accept_request(request_id):
     artisan_id = get_jwt_identity()
@@ -67,12 +155,18 @@ def accept_request(request_id):
         artisan_id,
     )
 
-    status = 200 if result["success"] else 400
+    status = get_result_status(result)
 
     return result, status
 
 
-@service_request_bp.route("/service-requests/<int:request_id>/start", methods=["PUT"])
+# ==========================
+# Start Service Request
+# ==========================
+@service_request_bp.route(
+    "/service-requests/<int:request_id>/start",
+    methods=["PUT"],
+)
 @jwt_required()
 def start_request(request_id):
     artisan_id = get_jwt_identity()
@@ -82,12 +176,18 @@ def start_request(request_id):
         artisan_id,
     )
 
-    status = 200 if result["success"] else 400
+    status = get_result_status(result)
 
     return result, status
 
 
-@service_request_bp.route("/service-requests/<int:request_id>/complete", methods=["PUT"])
+# ==========================
+# Complete Service Request
+# ==========================
+@service_request_bp.route(
+    "/service-requests/<int:request_id>/complete",
+    methods=["PUT"],
+)
 @jwt_required()
 def complete_request(request_id):
     artisan_id = get_jwt_identity()
@@ -97,12 +197,18 @@ def complete_request(request_id):
         artisan_id,
     )
 
-    status = 200 if result["success"] else 400
+    status = get_result_status(result)
 
     return result, status
 
 
-@service_request_bp.route("/service-requests/<int:request_id>/confirm", methods=["PUT"])
+# ==========================
+# Confirm Service Request
+# ==========================
+@service_request_bp.route(
+    "/service-requests/<int:request_id>/confirm",
+    methods=["PUT"],
+)
 @jwt_required()
 def confirm_request(request_id):
     customer_id = get_jwt_identity()
@@ -112,28 +218,46 @@ def confirm_request(request_id):
         customer_id,
     )
 
-    status = 200 if result["success"] else 400
+    status = get_result_status(result)
 
     return result, status
 
 
-@service_request_bp.route("/my/requests", methods=["GET"])
+# ==========================
+# Get Customer Requests
+# ==========================
+@service_request_bp.route(
+    "/my/requests",
+    methods=["GET"],
+)
 @jwt_required()
 def my_requests():
     customer_id = get_jwt_identity()
 
-    result = get_my_requests(customer_id)
+    result = get_my_requests(
+        customer_id,
+    )
 
-    return result, 200
+    status = get_result_status(result)
+
+    return result, status
 
 
-@service_request_bp.route("/my/jobs", methods=["GET"])
+# ==========================
+# Get Artisan Jobs
+# ==========================
+@service_request_bp.route(
+    "/my/jobs",
+    methods=["GET"],
+)
 @jwt_required()
 def my_jobs():
     artisan_id = get_jwt_identity()
 
-    result = get_my_jobs(artisan_id)
+    result = get_my_jobs(
+        artisan_id,
+    )
 
-    status = 200 if result["success"] else 400
+    status = get_result_status(result)
 
     return result, status

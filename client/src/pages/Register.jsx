@@ -2,32 +2,32 @@ import { useState } from "react";
 import {
   Link,
   Navigate,
-  useLocation,
   useNavigate,
 } from "react-router-dom";
 
 import useAuth from "../hooks/useAuth";
 
-function Login() {
+function Register() {
   const navigate = useNavigate();
-  const location = useLocation();
 
   const {
-    login,
+    register,
     isAuthenticated,
     loading: authLoading,
   } = useAuth();
 
   const [formData, setFormData] = useState({
+    full_name: "",
     email: "",
     password: "",
+    confirm_password: "",
+    phone: "",
+    city: "",
+    role: "customer",
   });
 
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-
-  const redirectPath =
-    location.state?.from?.pathname || "/dashboard";
 
   const handleChange = (event) => {
     const { name, value } = event.target;
@@ -42,38 +42,69 @@ function Login() {
     }
   };
 
+  const validateForm = () => {
+    const fullName = formData.full_name.trim();
+    const email = formData.email.trim().toLowerCase();
+    const password = formData.password;
+    const confirmPassword = formData.confirm_password;
+
+    if (!fullName) {
+      return "Please enter your full name.";
+    }
+
+    if (!email) {
+      return "Please enter your email address.";
+    }
+
+    if (!password) {
+      return "Please enter a password.";
+    }
+
+    if (password.length < 8) {
+      return "Password must be at least 8 characters long.";
+    }
+
+    if (password !== confirmPassword) {
+      return "Passwords do not match.";
+    }
+
+    if (!["customer", "artisan"].includes(formData.role)) {
+      return "Please select a valid account type.";
+    }
+
+    return "";
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     setErrorMessage("");
 
-    const email = formData.email.trim().toLowerCase();
-    const password = formData.password;
+    const validationError = validateForm();
 
-    if (!email) {
-      setErrorMessage("Please enter your email address.");
-      return;
-    }
-
-    if (!password) {
-      setErrorMessage("Please enter your password.");
+    if (validationError) {
+      setErrorMessage(validationError);
       return;
     }
 
     try {
       setSubmitting(true);
 
-      await login({
-        email,
-        password,
+      await register({
+        full_name: formData.full_name.trim(),
+        email: formData.email.trim().toLowerCase(),
+        password: formData.password,
+        phone: formData.phone.trim(),
+        city: formData.city.trim(),
+        role: formData.role,
       });
 
-      navigate(redirectPath, {
+      navigate("/dashboard", {
         replace: true,
       });
     } catch (error) {
       const message =
         error.response?.data?.message ||
-        "Unable to log in. Please check your details and try again.";
+        "Unable to create your account. Please try again.";
 
       setErrorMessage(message);
     } finally {
@@ -110,12 +141,12 @@ function Login() {
           </Link>
 
           <h1 style={styles.heading}>
-            Welcome back
+            Create your account
           </h1>
 
           <p style={styles.subheading}>
-            Log in to manage your service requests,
-            messages, notifications, and account.
+            Join ServiceFlow as a customer or artisan and
+            manage your services in one place.
           </p>
         </div>
 
@@ -132,6 +163,27 @@ function Login() {
           onSubmit={handleSubmit}
           style={styles.form}
         >
+          <div style={styles.field}>
+            <label
+              htmlFor="full_name"
+              style={styles.label}
+            >
+              Full name
+            </label>
+
+            <input
+              id="full_name"
+              name="full_name"
+              type="text"
+              value={formData.full_name}
+              onChange={handleChange}
+              autoComplete="name"
+              placeholder="John Smith"
+              disabled={submitting}
+              style={styles.input}
+            />
+          </div>
+
           <div style={styles.field}>
             <label
               htmlFor="email"
@@ -155,6 +207,74 @@ function Login() {
 
           <div style={styles.field}>
             <label
+              htmlFor="phone"
+              style={styles.label}
+            >
+              Phone number
+            </label>
+
+            <input
+              id="phone"
+              name="phone"
+              type="tel"
+              value={formData.phone}
+              onChange={handleChange}
+              autoComplete="tel"
+              placeholder="0712345678"
+              disabled={submitting}
+              style={styles.input}
+            />
+          </div>
+
+          <div style={styles.field}>
+            <label
+              htmlFor="city"
+              style={styles.label}
+            >
+              City
+            </label>
+
+            <input
+              id="city"
+              name="city"
+              type="text"
+              value={formData.city}
+              onChange={handleChange}
+              autoComplete="address-level2"
+              placeholder="Bloemfontein"
+              disabled={submitting}
+              style={styles.input}
+            />
+          </div>
+
+          <div style={styles.field}>
+            <label
+              htmlFor="role"
+              style={styles.label}
+            >
+              Account type
+            </label>
+
+            <select
+              id="role"
+              name="role"
+              value={formData.role}
+              onChange={handleChange}
+              disabled={submitting}
+              style={styles.input}
+            >
+              <option value="customer">
+                Customer
+              </option>
+
+              <option value="artisan">
+                Artisan
+              </option>
+            </select>
+          </div>
+
+          <div style={styles.field}>
+            <label
               htmlFor="password"
               style={styles.label}
             >
@@ -167,8 +287,29 @@ function Login() {
               type="password"
               value={formData.password}
               onChange={handleChange}
-              autoComplete="current-password"
-              placeholder="Enter your password"
+              autoComplete="new-password"
+              placeholder="At least 8 characters"
+              disabled={submitting}
+              style={styles.input}
+            />
+          </div>
+
+          <div style={styles.field}>
+            <label
+              htmlFor="confirm_password"
+              style={styles.label}
+            >
+              Confirm password
+            </label>
+
+            <input
+              id="confirm_password"
+              name="confirm_password"
+              type="password"
+              value={formData.confirm_password}
+              onChange={handleChange}
+              autoComplete="new-password"
+              placeholder="Enter the password again"
               disabled={submitting}
               style={styles.input}
             />
@@ -186,18 +327,18 @@ function Login() {
             }}
           >
             {submitting
-              ? "Logging in..."
-              : "Log in"}
+              ? "Creating account..."
+              : "Create account"}
           </button>
         </form>
 
-        <p style={styles.registerText}>
-          Don&apos;t have an account?{" "}
+        <p style={styles.loginText}>
+          Already have an account?{" "}
           <Link
-            to="/register"
-            style={styles.registerLink}
+            to="/login"
+            style={styles.loginLink}
           >
-            Create an account
+            Log in
           </Link>
         </p>
 
@@ -230,7 +371,7 @@ const styles = {
 
   card: {
     width: "100%",
-    maxWidth: "460px",
+    maxWidth: "540px",
     padding: "40px",
     borderRadius: "20px",
     backgroundColor: "#ffffff",
@@ -314,14 +455,14 @@ const styles = {
     fontWeight: "800",
   },
 
-  registerText: {
+  loginText: {
     margin: "24px 0 12px",
     color: "#64748b",
     fontSize: "14px",
     textAlign: "center",
   },
 
-  registerLink: {
+  loginLink: {
     color: "#2563eb",
     fontWeight: "700",
     textDecoration: "none",
@@ -336,4 +477,4 @@ const styles = {
   },
 };
 
-export default Login;
+export default Register;

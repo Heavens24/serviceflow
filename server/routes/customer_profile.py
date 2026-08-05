@@ -4,16 +4,15 @@ from flask_jwt_extended import (
     jwt_required,
 )
 
-from services.artisan_profile_service import (
+from services.customer_profile_service import (
     create_or_update_profile,
-    get_all_profiles,
     get_my_profile,
     get_profile,
 )
 
 
-artisan_profile_bp = Blueprint(
-    "artisan_profiles",
+customer_profile_bp = Blueprint(
+    "customer_profiles",
     __name__,
     url_prefix="/api",
 )
@@ -24,11 +23,6 @@ def get_result_status(
     success_status=200,
     failure_status=400,
 ):
-    """
-    Use the status code supplied by the service layer
-    when one is available.
-    """
-
     if result.get("success"):
         return success_status
 
@@ -41,8 +35,8 @@ def get_result_status(
 # ==========================
 # Create or Update Profile
 # ==========================
-@artisan_profile_bp.route(
-    "/artisan-profile",
+@customer_profile_bp.route(
+    "/customer-profile",
     methods=["POST", "PUT", "PATCH"],
 )
 @jwt_required()
@@ -70,8 +64,8 @@ def save_profile():
 # ==========================
 # Get Logged-In Profile
 # ==========================
-@artisan_profile_bp.route(
-    "/artisan-profile",
+@customer_profile_bp.route(
+    "/customer-profile",
     methods=["GET"],
 )
 @jwt_required()
@@ -89,30 +83,14 @@ def my_profile():
 
 
 # ==========================
-# Get All Public Profiles
+# Get Public Profile
 # ==========================
-@artisan_profile_bp.route(
-    "/artisan-profiles",
+@customer_profile_bp.route(
+    "/customer-profiles/<int:user_id>",
     methods=["GET"],
 )
 @jwt_required()
-def artisan_profiles():
-    result = get_all_profiles()
-
-    status = get_result_status(result)
-
-    return result, status
-
-
-# ==========================
-# Get One Public Profile
-# ==========================
-@artisan_profile_bp.route(
-    "/artisan-profiles/<int:user_id>",
-    methods=["GET"],
-)
-@jwt_required()
-def artisan_profile(user_id):
+def customer_profile(user_id):
     result = get_profile(user_id)
 
     status = get_result_status(

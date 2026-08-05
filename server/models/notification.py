@@ -13,6 +13,7 @@ class Notification(db.Model):
         db.Integer,
         db.ForeignKey("users.id"),
         nullable=False,
+        index=True,
     )
 
     title = db.Column(
@@ -36,19 +37,18 @@ class Notification(db.Model):
         db.Boolean,
         nullable=False,
         default=False,
-        server_default=db.text("0"),
+        server_default=db.text("false"),
     )
 
     created_at = db.Column(
         db.DateTime,
-        server_default=db.func.now(),
         nullable=False,
+        server_default=db.func.now(),
     )
 
     # ==========================
     # Relationships
     # ==========================
-
     user = db.relationship(
         "User",
         back_populates="notifications",

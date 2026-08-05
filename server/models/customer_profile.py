@@ -1,8 +1,8 @@
 from database import db
 
 
-class ArtisanProfile(db.Model):
-    __tablename__ = "artisan_profiles"
+class CustomerProfile(db.Model):
+    __tablename__ = "customer_profiles"
 
     id = db.Column(
         db.Integer,
@@ -14,6 +14,7 @@ class ArtisanProfile(db.Model):
         db.ForeignKey("users.id"),
         unique=True,
         nullable=False,
+        index=True,
     )
 
     bio = db.Column(
@@ -21,24 +22,11 @@ class ArtisanProfile(db.Model):
         nullable=True,
     )
 
-    skills = db.Column(
-        db.Text,
-        nullable=True,
-    )
-
-    experience_years = db.Column(
-        db.Integer,
-        default=0,
-    )
-
-    hourly_rate = db.Column(
-        db.Float,
-        nullable=True,
-    )
-
-    availability = db.Column(
+    preferred_contact_method = db.Column(
         db.String(30),
-        default="Available",
+        nullable=False,
+        default="ServiceFlow Messages",
+        server_default="ServiceFlow Messages",
     )
 
     profile_image = db.Column(
@@ -48,7 +36,15 @@ class ArtisanProfile(db.Model):
 
     created_at = db.Column(
         db.DateTime,
+        nullable=False,
         server_default=db.func.now(),
+    )
+
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        server_default=db.func.now(),
+        onupdate=db.func.now(),
     )
 
     # ==========================
@@ -57,12 +53,12 @@ class ArtisanProfile(db.Model):
 
     user = db.relationship(
         "User",
-        back_populates="artisan_profile",
+        back_populates="customer_profile",
     )
 
     def __repr__(self):
         return (
-            f"<ArtisanProfile "
+            f"<CustomerProfile "
             f"id={self.id} "
             f"user_id={self.user_id}>"
         )

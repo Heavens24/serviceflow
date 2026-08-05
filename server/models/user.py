@@ -96,7 +96,13 @@ class User(db.Model):
         cascade="all, delete-orphan",
     )
 
-    # NEW
+    customer_profile = db.relationship(
+        "CustomerProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
     notifications = db.relationship(
         "Notification",
         back_populates="user",

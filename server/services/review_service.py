@@ -1,7 +1,8 @@
 from database import db
 from models.review import Review
-from models.user import User
 from models.service_request import ServiceRequest
+from models.user import User
+from services.notification_service import create_notification
 
 
 def review_to_dict(review):
@@ -47,7 +48,31 @@ def create_review(data, customer_id):
             "message": "Service request ID is required.",
         }
 
-    service_request = ServiceRequest.query.get(service_request_id)
+    try:
+        service_request_id = int(service_request_id)
+    except (TypeError, ValueError):
+        return {
+            "success": False,
+            "message": "Service request ID must be valid.",
+        }
+
+    customer = User.query.get(int(customer_id))
+
+    if not customer:
+        return {
+            "success": False,
+            "message": "Customer not found.",
+        }
+
+    if customer.role != "customer":
+        return {
+            "success": False,
+            "message": "Only customers can submit reviews.",
+        }
+
+    service_request = ServiceRequest.query.get(
+        service_request_id,
+    )
 
     if not service_request:
         return {
@@ -55,7 +80,7 @@ def create_review(data, customer_id):
             "message": "Service request not found.",
         }
 
-    if service_request.customer_id != int(customer_id):
+    if service_request.customer_id != customer.id:
         return {
             "success": False,
             "message": "You do not own this service request.",
@@ -67,14 +92,24 @@ def create_review(data, customer_id):
             "message": "Only confirmed jobs can be reviewed.",
         }
 
+    if not service_request.artisan_id:
+        return {
+            "success": False,
+            "message": (
+                "This service request has no assigned artisan."
+            ),
+        }
+
     existing_review = Review.query.filter_by(
-        service_request_id=service_request.id
+        service_request_id=service_request.id,
     ).first()
 
     if existing_review:
         return {
             "success": False,
-            "message": "You have already reviewed this service request.",
+            "message": (
+                "You have already reviewed this service request."
+            ),
         }
 
     review = Review(
@@ -85,8 +120,28 @@ def create_review(data, customer_id):
         service_request_id=service_request.id,
     )
 
-    db.session.add(review)
-    db.session.commit()
+    try:
+        db.session.add(review)
+
+        create_notification(
+            user_id=service_request.artisan_id,
+            title="New review received",
+            message=(
+                f'You received a {rating}-star review for '
+                f'"{service_request.title}".'
+            ),
+            notification_type="review_received",
+            commit=False,
+        )
+
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+        return {
+            "success": False,
+            "message": "Unable to submit your review.",
+        }
 
     return {
         "success": True,
@@ -117,6 +172,12 @@ def get_artisan_reviews(artisan_id):
         return {
             "success": False,
             "message": "Artisan not found.",
+        }
+
+    if artisan.role != "artisan":
+        return {
+            "success": False,
+            "message": "User is not an artisan.",
         }
 
     reviews = (

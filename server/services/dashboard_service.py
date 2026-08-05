@@ -1,15 +1,15 @@
 from sqlalchemy import func
-from database import db
 
-from models.user import User
-from models.service_request import ServiceRequest
-from models.review import Review
+from database import db
 from models.notification import Notification
+from models.review import Review
+from models.service_request import ServiceRequest
+from models.user import User
 
 
 def get_dashboard(user_id):
     """
-    Returns dashboard statistics based on the logged-in user's role.
+    Return dashboard statistics based on the logged-in user's role.
     """
 
     user = User.query.get(int(user_id))
@@ -17,27 +17,33 @@ def get_dashboard(user_id):
     if not user:
         return {
             "success": False,
-            "message": "User not found."
+            "message": "User not found.",
         }
 
     # ==========================================
-    # CUSTOMER DASHBOARD
+    # Customer Dashboard
     # ==========================================
-
     if user.role == "customer":
-
         total_requests = ServiceRequest.query.filter_by(
-            customer_id=user.id
+            customer_id=user.id,
         ).count()
 
+        # New service requests use the internal status "open".
+        # The API still returns "pending_requests" as the
+        # user-friendly dashboard label.
         pending_requests = ServiceRequest.query.filter_by(
             customer_id=user.id,
-            status="pending",
+            status="open",
         ).count()
 
         in_progress = ServiceRequest.query.filter(
             ServiceRequest.customer_id == user.id,
-            ServiceRequest.status.in_(["accepted", "in_progress"])
+            ServiceRequest.status.in_(
+                [
+                    "accepted",
+                    "in_progress",
+                ]
+            ),
         ).count()
 
         completed = ServiceRequest.query.filter_by(
@@ -63,16 +69,20 @@ def get_dashboard(user_id):
         }
 
     # ==========================================
-    # ARTISAN DASHBOARD
+    # Artisan Dashboard
     # ==========================================
-
     jobs_accepted = ServiceRequest.query.filter_by(
         artisan_id=user.id,
     ).count()
 
     jobs_in_progress = ServiceRequest.query.filter(
         ServiceRequest.artisan_id == user.id,
-        ServiceRequest.status.in_(["accepted", "in_progress"])
+        ServiceRequest.status.in_(
+            [
+                "accepted",
+                "in_progress",
+            ]
+        ),
     ).count()
 
     jobs_completed = ServiceRequest.query.filter_by(
@@ -81,7 +91,7 @@ def get_dashboard(user_id):
     ).count()
 
     total_reviews = Review.query.filter_by(
-        artisan_id=user.id
+        artisan_id=user.id,
     ).count()
 
     average_rating = (
@@ -105,7 +115,10 @@ def get_dashboard(user_id):
             "jobs_accepted": jobs_accepted,
             "jobs_in_progress": jobs_in_progress,
             "jobs_completed": jobs_completed,
-            "average_rating": round(float(average_rating), 2),
+            "average_rating": round(
+                float(average_rating),
+                2,
+            ),
             "total_reviews": total_reviews,
             "unread_notifications": unread_notifications,
         },
