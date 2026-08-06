@@ -1,6 +1,6 @@
 import api from "./api";
 
-function buildUserQuery(params = {}) {
+function buildQuery(params = {}) {
   const query = new URLSearchParams();
 
   Object.entries(params).forEach(
@@ -41,7 +41,7 @@ const adminService = {
   // ==========================
   async getUsers(params = {}) {
     const queryString =
-      buildUserQuery(params);
+      buildQuery(params);
 
     const endpoint = queryString
       ? `/api/admin/users?${queryString}`
@@ -116,6 +116,63 @@ const adminService = {
       {
         role,
       },
+    );
+
+    return data;
+  },
+
+  // ==========================
+  // Admin Jobs
+  // ==========================
+  async getJobs(params = {}) {
+    const queryString =
+      buildQuery(params);
+
+    const endpoint = queryString
+      ? `/api/admin/jobs?${queryString}`
+      : "/api/admin/jobs";
+
+    const { data } = await api.get(
+      endpoint,
+    );
+
+    return data;
+  },
+
+  // ==========================
+  // Get One Admin Job
+  // ==========================
+  async getJob(jobId) {
+    const { data } = await api.get(
+      `/api/admin/jobs/${jobId}`,
+    );
+
+    return data;
+  },
+
+  // ==========================
+  // Update Job Status
+  // ==========================
+  async updateJobStatus(
+    jobId,
+    status,
+  ) {
+    const { data } = await api.patch(
+      `/api/admin/jobs/${jobId}/status`,
+      {
+        status,
+      },
+    );
+
+    return data;
+  },
+
+  // ==========================
+  // Delete Job
+  // ==========================
+  async deleteJob(jobId) {
+    const { data } = await api.delete(
+      `/api/admin/jobs/${jobId}`,
     );
 
     return data;
