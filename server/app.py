@@ -22,6 +22,7 @@ from models import (
 # ==========================
 # Import Routes
 # ==========================
+from routes.admin import admin_bp
 from routes.artisan_profile import (
     artisan_profile_bp,
 )
@@ -209,6 +210,10 @@ app.register_blueprint(
 
 app.register_blueprint(
     dashboard_bp,
+)
+
+app.register_blueprint(
+    admin_bp,
 )
 
 
