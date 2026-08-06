@@ -682,3 +682,374 @@ def get_admin_users():
             "cities": available_cities,
         },
     }, 200
+
+# ==========================
+# Update User Status
+# ==========================
+@admin_bp.route(
+    "/users/<int:user_id>/status",
+    methods=["PATCH"],
+)
+@admin_required
+def update_admin_user_status(user_id):
+    data = request.get_json(
+        silent=True,
+    )
+
+    if not isinstance(data, dict):
+        return {
+            "success": False,
+            "message": (
+                "A valid JSON request body "
+                "is required."
+            ),
+        }, 400
+
+    status = str(
+        data.get(
+            "status",
+            "",
+        ),
+    ).strip().lower()
+
+    if not status:
+        return {
+            "success": False,
+            "message": "Status is required.",
+        }, 400
+
+    if status not in VALID_USER_STATUSES:
+        return {
+            "success": False,
+            "message": (
+                "Status must be active, "
+                "suspended, or banned."
+            ),
+        }, 400
+
+    user = db.session.get(
+        User,
+        user_id,
+    )
+
+    if not user:
+        return {
+            "success": False,
+            "message": "User not found.",
+        }, 404
+
+    if (
+        user.id == g.current_user.id
+        and status != "active"
+    ):
+        return {
+            "success": False,
+            "message": (
+                "You cannot suspend or ban "
+                "your own administrator account."
+            ),
+        }, 400
+
+    if (
+        user.role == "admin"
+        and user.status == "active"
+        and status != "active"
+    ):
+        active_admins = User.query.filter_by(
+            role="admin",
+            status="active",
+        ).count()
+
+        if active_admins <= 1:
+            return {
+                "success": False,
+                "message": (
+                    "The last active administrator "
+                    "cannot be suspended or banned."
+                ),
+            }, 400
+
+    if user.status == status:
+        return {
+            "success": True,
+            "message": (
+                f"User status is already {status}."
+            ),
+            "user": serialize_admin_user(
+                user,
+            ),
+        }, 200
+
+    user.status = status
+
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+        return {
+            "success": False,
+            "message": (
+                "Unable to update the user status "
+                "right now."
+            ),
+        }, 500
+
+    return {
+        "success": True,
+        "message": (
+            f"User status updated to {status}."
+        ),
+        "user": serialize_admin_user(
+            user,
+        ),
+    }, 200
+
+
+# ==========================
+# Update User Verification
+# ==========================
+@admin_bp.route(
+    "/users/<int:user_id>/verify",
+    methods=["PATCH"],
+)
+@admin_required
+def update_admin_user_verification(user_id):
+    data = request.get_json(
+        silent=True,
+    )
+
+    if not isinstance(data, dict):
+        return {
+            "success": False,
+            "message": (
+                "A valid JSON request body "
+                "is required."
+            ),
+        }, 400
+
+    has_verified = "verified" in data
+    has_email_verified = (
+        "email_verified" in data
+    )
+
+    if (
+        not has_verified
+        and not has_email_verified
+    ):
+        return {
+            "success": False,
+            "message": (
+                "Provide verified or "
+                "email_verified."
+            ),
+        }, 400
+
+    verified = None
+    email_verified = None
+
+    if has_verified:
+        verified, verified_error = (
+            parse_boolean_filter(
+                data.get("verified"),
+                "Verified",
+            )
+        )
+
+        if verified_error:
+            return verified_error, 400
+
+        if verified is None:
+            return {
+                "success": False,
+                "message": (
+                    "Verified must be either "
+                    "true or false."
+                ),
+            }, 400
+
+    if has_email_verified:
+        (
+            email_verified,
+            email_verified_error,
+        ) = parse_boolean_filter(
+            data.get("email_verified"),
+            "Email verified",
+        )
+
+        if email_verified_error:
+            return email_verified_error, 400
+
+        if email_verified is None:
+            return {
+                "success": False,
+                "message": (
+                    "Email verified must be either "
+                    "true or false."
+                ),
+            }, 400
+
+    user = db.session.get(
+        User,
+        user_id,
+    )
+
+    if not user:
+        return {
+            "success": False,
+            "message": "User not found.",
+        }, 404
+
+    if has_verified:
+        user.verified = verified
+
+    if has_email_verified:
+        user.email_verified = (
+            email_verified
+        )
+
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+        return {
+            "success": False,
+            "message": (
+                "Unable to update verification "
+                "right now."
+            ),
+        }, 500
+
+    return {
+        "success": True,
+        "message": (
+            "User verification updated "
+            "successfully."
+        ),
+        "user": serialize_admin_user(
+            user,
+        ),
+    }, 200
+
+
+# ==========================
+# Update User Role
+# ==========================
+@admin_bp.route(
+    "/users/<int:user_id>/role",
+    methods=["PATCH"],
+)
+@admin_required
+def update_admin_user_role(user_id):
+    data = request.get_json(
+        silent=True,
+    )
+
+    if not isinstance(data, dict):
+        return {
+            "success": False,
+            "message": (
+                "A valid JSON request body "
+                "is required."
+            ),
+        }, 400
+
+    role = str(
+        data.get(
+            "role",
+            "",
+        ),
+    ).strip().lower()
+
+    if not role:
+        return {
+            "success": False,
+            "message": "Role is required.",
+        }, 400
+
+    if role not in VALID_USER_ROLES:
+        return {
+            "success": False,
+            "message": (
+                "Role must be customer, "
+                "artisan, or admin."
+            ),
+        }, 400
+
+    user = db.session.get(
+        User,
+        user_id,
+    )
+
+    if not user:
+        return {
+            "success": False,
+            "message": "User not found.",
+        }, 404
+
+    if user.id == g.current_user.id:
+        return {
+            "success": False,
+            "message": (
+                "You cannot change your own "
+                "administrator role."
+            ),
+        }, 400
+
+    if (
+        user.role == "admin"
+        and role != "admin"
+    ):
+        active_admins = User.query.filter_by(
+            role="admin",
+            status="active",
+        ).count()
+
+        if (
+            user.status == "active"
+            and active_admins <= 1
+        ):
+            return {
+                "success": False,
+                "message": (
+                    "The last active administrator "
+                    "cannot be demoted."
+                ),
+            }, 400
+
+    if user.role == role:
+        return {
+            "success": True,
+            "message": (
+                f"User role is already {role}."
+            ),
+            "user": serialize_admin_user(
+                user,
+            ),
+        }, 200
+
+    user.role = role
+
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+        return {
+            "success": False,
+            "message": (
+                "Unable to update the user role "
+                "right now."
+            ),
+        }, 500
+
+    return {
+        "success": True,
+        "message": (
+            f"User role updated to {role}."
+        ),
+        "user": serialize_admin_user(
+            user,
+        ),
+    }, 200
