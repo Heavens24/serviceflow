@@ -1,5 +1,6 @@
 import { Route, Routes } from "react-router-dom";
 
+import AdminRoute from "./auth/AdminRoute";
 import ProtectedRoute from "./auth/ProtectedRoute";
 
 import About from "./pages/About";
@@ -21,21 +22,46 @@ import Notifications from "./pages/Notifications";
 import Register from "./pages/Register";
 import Services from "./pages/Services";
 
+import AdminDashboard from "./pages/admin/AdminDashboard";
+
 function App() {
   return (
     <Routes>
       {/* ==========================
           Public Routes
       ========================== */}
-      <Route path="/" element={<Home />} />
-      <Route path="/about" element={<About />} />
-      <Route path="/services" element={<Services />} />
-      <Route path="/contact" element={<Contact />} />
-      <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
+      <Route
+        path="/"
+        element={<Home />}
+      />
+
+      <Route
+        path="/about"
+        element={<About />}
+      />
+
+      <Route
+        path="/services"
+        element={<Services />}
+      />
+
+      <Route
+        path="/contact"
+        element={<Contact />}
+      />
+
+      <Route
+        path="/login"
+        element={<Login />}
+      />
+
+      <Route
+        path="/register"
+        element={<Register />}
+      />
 
       {/* ==========================
-          Protected Routes
+          General Protected Routes
       ========================== */}
       <Route
         path="/booking"
@@ -143,9 +169,33 @@ function App() {
       />
 
       {/* ==========================
+          Admin Routes
+      ========================== */}
+      <Route
+        path="/admin"
+        element={
+          <AdminRoute>
+            <AdminDashboard />
+          </AdminRoute>
+        }
+      />
+
+      <Route
+        path="/admin/dashboard"
+        element={
+          <AdminRoute>
+            <AdminDashboard />
+          </AdminRoute>
+        }
+      />
+
+      {/* ==========================
           Fallback Route
       ========================== */}
-      <Route path="*" element={<NotFound />} />
+      <Route
+        path="*"
+        element={<NotFound />}
+      />
     </Routes>
   );
 }
