@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from flask import (
     Blueprint,
     g,
@@ -1052,4 +1054,834 @@ def update_admin_user_role(user_id):
         "user": serialize_admin_user(
             user,
         ),
+    }, 200
+
+# ==========================
+# Serialize Job User Summary
+# ==========================
+def serialize_job_user_summary(user):
+    if not user:
+        return None
+
+    return {
+        "id": user.id,
+        "full_name": user.full_name,
+        "email": user.email,
+        "phone": user.phone,
+        "city": user.city,
+        "role": user.role,
+        "status": user.status,
+        "verified": user.verified,
+    }
+
+
+# ==========================
+# Serialize Admin Job
+# ==========================
+def serialize_admin_job(
+    job,
+    users_by_id=None,
+):
+    users_by_id = users_by_id or {}
+
+    customer = users_by_id.get(
+        job.customer_id,
+    )
+
+    artisan = (
+        users_by_id.get(job.artisan_id)
+        if job.artisan_id
+        else None
+    )
+
+    return {
+        "id": job.id,
+        "title": job.title,
+        "description": job.description,
+        "category": job.category,
+        "location": job.location,
+        "budget": float(job.budget or 0),
+        "status": job.status,
+        "customer_id": job.customer_id,
+        "artisan_id": job.artisan_id,
+        "customer": serialize_job_user_summary(
+            customer,
+        ),
+        "artisan": serialize_job_user_summary(
+            artisan,
+        ),
+        "has_review": job.review is not None,
+        "message_count": len(job.messages or []),
+        "accepted_at": (
+            job.accepted_at.isoformat()
+            if job.accepted_at
+            else None
+        ),
+        "started_at": (
+            job.started_at.isoformat()
+            if job.started_at
+            else None
+        ),
+        "completed_at": (
+            job.completed_at.isoformat()
+            if job.completed_at
+            else None
+        ),
+        "confirmed_at": (
+            job.confirmed_at.isoformat()
+            if job.confirmed_at
+            else None
+        ),
+        "created_at": (
+            job.created_at.isoformat()
+            if job.created_at
+            else None
+        ),
+    }
+
+
+def parse_optional_integer(value, field_name):
+    if value is None or value == "":
+        return None, None
+
+    try:
+        parsed_value = int(value)
+    except (TypeError, ValueError):
+        return None, {
+            "success": False,
+            "message": (
+                f"{field_name} must be a valid integer."
+            ),
+        }
+
+    if parsed_value < 1:
+        return None, {
+            "success": False,
+            "message": (
+                f"{field_name} must be greater than zero."
+            ),
+        }
+
+    return parsed_value, None
+
+
+def parse_optional_number(value, field_name):
+    if value is None or value == "":
+        return None, None
+
+    try:
+        parsed_value = float(value)
+    except (TypeError, ValueError):
+        return None, {
+            "success": False,
+            "message": (
+                f"{field_name} must be a valid number."
+            ),
+        }
+
+    if parsed_value < 0:
+        return None, {
+            "success": False,
+            "message": (
+                f"{field_name} cannot be negative."
+            ),
+        }
+
+    return parsed_value, None
+
+
+# ==========================
+# Admin Job Management
+# ==========================
+@admin_bp.route(
+    "/jobs",
+    methods=["GET"],
+)
+@admin_required
+def get_admin_jobs():
+    search = request.args.get(
+        "search",
+        "",
+    ).strip()
+
+    status = request.args.get(
+        "status",
+        "",
+    ).strip().lower()
+
+    category = request.args.get(
+        "category",
+        "",
+    ).strip()
+
+    location = request.args.get(
+        "location",
+        "",
+    ).strip()
+
+    sort = request.args.get(
+        "sort",
+        "newest",
+    ).strip().lower()
+
+    customer_id, customer_error = parse_optional_integer(
+        request.args.get("customer_id"),
+        "Customer ID",
+    )
+
+    if customer_error:
+        return customer_error, 400
+
+    artisan_id, artisan_error = parse_optional_integer(
+        request.args.get("artisan_id"),
+        "Artisan ID",
+    )
+
+    if artisan_error:
+        return artisan_error, 400
+
+    min_budget, min_budget_error = parse_optional_number(
+        request.args.get("min_budget"),
+        "Minimum budget",
+    )
+
+    if min_budget_error:
+        return min_budget_error, 400
+
+    max_budget, max_budget_error = parse_optional_number(
+        request.args.get("max_budget"),
+        "Maximum budget",
+    )
+
+    if max_budget_error:
+        return max_budget_error, 400
+
+    if (
+        min_budget is not None
+        and max_budget is not None
+        and min_budget > max_budget
+    ):
+        return {
+            "success": False,
+            "message": (
+                "Minimum budget cannot be greater than maximum budget."
+            ),
+        }, 400
+
+    page, page_error = parse_optional_integer(
+        request.args.get("page", 1),
+        "Page",
+    )
+
+    if page_error:
+        return page_error, 400
+
+    per_page, per_page_error = parse_optional_integer(
+        request.args.get(
+            "per_page",
+            DEFAULT_PAGE_SIZE,
+        ),
+        "Per-page",
+    )
+
+    if per_page_error:
+        return per_page_error, 400
+
+    if per_page > MAX_PAGE_SIZE:
+        return {
+            "success": False,
+            "message": (
+                "Per-page must be between "
+                f"1 and {MAX_PAGE_SIZE}."
+            ),
+        }, 400
+
+    valid_sort_options = {
+        "newest",
+        "oldest",
+        "budget_high",
+        "budget_low",
+    }
+
+    if sort not in valid_sort_options:
+        return {
+            "success": False,
+            "message": (
+                "Sort must be newest, oldest, "
+                "budget_high, or budget_low."
+            ),
+        }, 400
+
+    query = ServiceRequest.query
+
+    if search:
+        search_pattern = f"%{search}%"
+
+        query = query.filter(
+            or_(
+                ServiceRequest.title.ilike(
+                    search_pattern,
+                ),
+                ServiceRequest.description.ilike(
+                    search_pattern,
+                ),
+                ServiceRequest.category.ilike(
+                    search_pattern,
+                ),
+                ServiceRequest.location.ilike(
+                    search_pattern,
+                ),
+            ),
+        )
+
+    if status and status != "all":
+        query = query.filter(
+            func.lower(
+                ServiceRequest.status,
+            )
+            == status,
+        )
+
+    if category and category != "all":
+        query = query.filter(
+            func.lower(
+                ServiceRequest.category,
+            )
+            == category.lower(),
+        )
+
+    if location and location != "all":
+        query = query.filter(
+            func.lower(
+                ServiceRequest.location,
+            )
+            == location.lower(),
+        )
+
+    if customer_id is not None:
+        query = query.filter(
+            ServiceRequest.customer_id
+            == customer_id,
+        )
+
+    if artisan_id is not None:
+        query = query.filter(
+            ServiceRequest.artisan_id
+            == artisan_id,
+        )
+
+    if min_budget is not None:
+        query = query.filter(
+            ServiceRequest.budget
+            >= min_budget,
+        )
+
+    if max_budget is not None:
+        query = query.filter(
+            ServiceRequest.budget
+            <= max_budget,
+        )
+
+    filtered_total = query.count()
+
+    filtered_value = (
+        query.with_entities(
+            func.coalesce(
+                func.sum(
+                    ServiceRequest.budget,
+                ),
+                0,
+            ),
+        ).scalar()
+        or 0
+    )
+
+    if sort == "oldest":
+        query = query.order_by(
+            ServiceRequest.created_at.asc(),
+            ServiceRequest.id.asc(),
+        )
+    elif sort == "budget_high":
+        query = query.order_by(
+            ServiceRequest.budget.desc(),
+            ServiceRequest.created_at.desc(),
+        )
+    elif sort == "budget_low":
+        query = query.order_by(
+            ServiceRequest.budget.asc(),
+            ServiceRequest.created_at.desc(),
+        )
+    else:
+        query = query.order_by(
+            ServiceRequest.created_at.desc(),
+            ServiceRequest.id.desc(),
+        )
+
+    pagination = query.paginate(
+        page=page,
+        per_page=per_page,
+        error_out=False,
+    )
+
+    jobs = pagination.items
+
+    related_user_ids = {
+        user_id
+        for job in jobs
+        for user_id in (
+            job.customer_id,
+            job.artisan_id,
+        )
+        if user_id is not None
+    }
+
+    users_by_id = {}
+
+    if related_user_ids:
+        related_users = (
+            User.query.filter(
+                User.id.in_(
+                    related_user_ids,
+                ),
+            ).all()
+        )
+
+        users_by_id = {
+            user.id: user
+            for user in related_users
+        }
+
+    available_statuses = [
+        value
+        for (value,) in (
+            db.session.query(
+                ServiceRequest.status,
+            )
+            .filter(
+                ServiceRequest.status.isnot(None),
+                ServiceRequest.status != "",
+            )
+            .distinct()
+            .order_by(
+                ServiceRequest.status.asc(),
+            )
+            .all()
+        )
+    ]
+
+    available_categories = [
+        value
+        for (value,) in (
+            db.session.query(
+                ServiceRequest.category,
+            )
+            .filter(
+                ServiceRequest.category.isnot(None),
+                ServiceRequest.category != "",
+            )
+            .distinct()
+            .order_by(
+                ServiceRequest.category.asc(),
+            )
+            .all()
+        )
+    ]
+
+    available_locations = [
+        value
+        for (value,) in (
+            db.session.query(
+                ServiceRequest.location,
+            )
+            .filter(
+                ServiceRequest.location.isnot(None),
+                ServiceRequest.location != "",
+            )
+            .distinct()
+            .order_by(
+                ServiceRequest.location.asc(),
+            )
+            .all()
+        )
+    ]
+
+    return {
+        "success": True,
+        "message": "Jobs loaded successfully.",
+        "jobs": [
+            serialize_admin_job(
+                job,
+                users_by_id,
+            )
+            for job in jobs
+        ],
+        "summary": {
+            "matching_jobs": filtered_total,
+            "matching_value": float(
+                filtered_value,
+            ),
+        },
+        "pagination": {
+            "page": pagination.page,
+            "per_page": pagination.per_page,
+            "total": pagination.total,
+            "pages": pagination.pages,
+            "has_next": pagination.has_next,
+            "has_previous": pagination.has_prev,
+            "next_page": (
+                pagination.next_num
+                if pagination.has_next
+                else None
+            ),
+            "previous_page": (
+                pagination.prev_num
+                if pagination.has_prev
+                else None
+            ),
+        },
+        "filters": {
+            "search": search,
+            "status": status or "all",
+            "category": category or "all",
+            "location": location or "all",
+            "customer_id": customer_id,
+            "artisan_id": artisan_id,
+            "min_budget": min_budget,
+            "max_budget": max_budget,
+            "sort": sort,
+        },
+        "filter_options": {
+            "statuses": available_statuses,
+            "categories": available_categories,
+            "locations": available_locations,
+            "sorts": [
+                "newest",
+                "oldest",
+                "budget_high",
+                "budget_low",
+            ],
+        },
+    }, 200
+
+# ==========================
+# Supported Admin Job Statuses
+# ==========================
+VALID_ADMIN_JOB_STATUSES = {
+    "open",
+    "accepted",
+    "in_progress",
+    "completed",
+    "confirmed",
+    "cancelled",
+}
+
+
+# ==========================
+# Load Job User Map
+# ==========================
+def get_job_users_by_id(job):
+    user_ids = {
+        user_id
+        for user_id in (
+            job.customer_id,
+            job.artisan_id,
+        )
+        if user_id is not None
+    }
+
+    if not user_ids:
+        return {}
+
+    users = (
+        User.query.filter(
+            User.id.in_(user_ids),
+        ).all()
+    )
+
+    return {
+        user.id: user
+        for user in users
+    }
+
+
+# ==========================
+# Get One Admin Job
+# ==========================
+@admin_bp.route(
+    "/jobs/<int:job_id>",
+    methods=["GET"],
+)
+@admin_required
+def get_admin_job(job_id):
+    job = db.session.get(
+        ServiceRequest,
+        job_id,
+    )
+
+    if not job:
+        return {
+            "success": False,
+            "message": "Job not found.",
+        }, 404
+
+    users_by_id = get_job_users_by_id(
+        job,
+    )
+
+    return {
+        "success": True,
+        "message": (
+            "Job loaded successfully."
+        ),
+        "job": serialize_admin_job(
+            job,
+            users_by_id,
+        ),
+    }, 200
+
+
+# ==========================
+# Update Admin Job Status
+# ==========================
+@admin_bp.route(
+    "/jobs/<int:job_id>/status",
+    methods=["PATCH"],
+)
+@admin_required
+def update_admin_job_status(job_id):
+    data = request.get_json(
+        silent=True,
+    )
+
+    if not isinstance(data, dict):
+        return {
+            "success": False,
+            "message": (
+                "A valid JSON request body "
+                "is required."
+            ),
+        }, 400
+
+    status = str(
+        data.get(
+            "status",
+            "",
+        ),
+    ).strip().lower()
+
+    if not status:
+        return {
+            "success": False,
+            "message": (
+                "Job status is required."
+            ),
+        }, 400
+
+    if status not in VALID_ADMIN_JOB_STATUSES:
+        return {
+            "success": False,
+            "message": (
+                "Status must be open, accepted, "
+                "in_progress, completed, "
+                "confirmed, or cancelled."
+            ),
+        }, 400
+
+    job = db.session.get(
+        ServiceRequest,
+        job_id,
+    )
+
+    if not job:
+        return {
+            "success": False,
+            "message": "Job not found.",
+        }, 404
+
+    if job.status == status:
+        users_by_id = (
+            get_job_users_by_id(job)
+        )
+
+        return {
+            "success": True,
+            "message": (
+                f"Job status is already {status}."
+            ),
+            "job": serialize_admin_job(
+                job,
+                users_by_id,
+            ),
+        }, 200
+
+    statuses_requiring_artisan = {
+        "accepted",
+        "in_progress",
+        "completed",
+        "confirmed",
+    }
+
+    if (
+        status in statuses_requiring_artisan
+        and job.artisan_id is None
+    ):
+        return {
+            "success": False,
+            "message": (
+                "This status requires an artisan "
+                "who accepted the job. Admins do "
+                "not assign artisans."
+            ),
+        }, 400
+
+    now = datetime.utcnow()
+
+    if status == "open":
+        job.artisan_id = None
+        job.accepted_at = None
+        job.started_at = None
+        job.completed_at = None
+        job.confirmed_at = None
+
+    elif status == "accepted":
+        if job.accepted_at is None:
+            job.accepted_at = now
+
+        job.started_at = None
+        job.completed_at = None
+        job.confirmed_at = None
+
+    elif status == "in_progress":
+        if job.accepted_at is None:
+            job.accepted_at = now
+
+        if job.started_at is None:
+            job.started_at = now
+
+        job.completed_at = None
+        job.confirmed_at = None
+
+    elif status == "completed":
+        if job.accepted_at is None:
+            job.accepted_at = now
+
+        if job.started_at is None:
+            job.started_at = now
+
+        if job.completed_at is None:
+            job.completed_at = now
+
+        job.confirmed_at = None
+
+    elif status == "confirmed":
+        if job.accepted_at is None:
+            job.accepted_at = now
+
+        if job.started_at is None:
+            job.started_at = now
+
+        if job.completed_at is None:
+            job.completed_at = now
+
+        if job.confirmed_at is None:
+            job.confirmed_at = now
+
+    elif status == "cancelled":
+        # Preserve the artisan and lifecycle history
+        # for moderation and dispute review.
+        pass
+
+    job.status = status
+
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+        return {
+            "success": False,
+            "message": (
+                "Unable to update the job status "
+                "right now."
+            ),
+        }, 500
+
+    users_by_id = get_job_users_by_id(
+        job,
+    )
+
+    return {
+        "success": True,
+        "message": (
+            f"Job status updated to {status}."
+        ),
+        "job": serialize_admin_job(
+            job,
+            users_by_id,
+        ),
+    }, 200
+
+
+# ==========================
+# Delete Admin Job
+# ==========================
+@admin_bp.route(
+    "/jobs/<int:job_id>",
+    methods=["DELETE"],
+)
+@admin_required
+def delete_admin_job(job_id):
+    job = db.session.get(
+        ServiceRequest,
+        job_id,
+    )
+
+    if not job:
+        return {
+            "success": False,
+            "message": "Job not found.",
+        }, 404
+
+    deletable_statuses = {
+        "open",
+        "cancelled",
+    }
+
+    if job.status not in deletable_statuses:
+        return {
+            "success": False,
+            "message": (
+                "Only open or cancelled jobs "
+                "can be deleted. Cancel the job "
+                "first to preserve marketplace "
+                "workflow integrity."
+            ),
+        }, 400
+
+    deleted_job = {
+        "id": job.id,
+        "title": job.title,
+        "status": job.status,
+    }
+
+    try:
+        db.session.delete(job)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+        return {
+            "success": False,
+            "message": (
+                "Unable to delete the job "
+                "right now."
+            ),
+        }, 500
+
+    return {
+        "success": True,
+        "message": (
+            "Job deleted successfully."
+        ),
+        "job": deleted_job,
     }, 200
