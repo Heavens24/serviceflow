@@ -1,5 +1,12 @@
-from flask import Blueprint, g
-from sqlalchemy import func
+from flask import (
+    Blueprint,
+    g,
+    request,
+)
+from sqlalchemy import (
+    func,
+    or_,
+)
 
 from database import db
 from models.review import Review
@@ -16,7 +23,7 @@ admin_bp = Blueprint(
 
 
 # ==========================
-# Supported Job Statuses
+# Supported Values
 # ==========================
 KNOWN_JOB_STATUSES = {
     "open",
@@ -24,6 +31,88 @@ KNOWN_JOB_STATUSES = {
     "in_progress",
     "confirmed",
 }
+
+VALID_USER_ROLES = {
+    "customer",
+    "artisan",
+    "admin",
+}
+
+VALID_USER_STATUSES = {
+    "active",
+    "suspended",
+    "banned",
+}
+
+DEFAULT_PAGE_SIZE = 20
+MAX_PAGE_SIZE = 100
+
+
+# ==========================
+# Serialize User
+# ==========================
+def serialize_admin_user(user):
+    return {
+        "id": user.id,
+        "full_name": user.full_name,
+        "email": user.email,
+        "phone": user.phone,
+        "city": user.city,
+        "role": user.role,
+        "status": user.status,
+        "verified": user.verified,
+        "email_verified": (
+            user.email_verified
+        ),
+        "is_pro": user.is_pro,
+        "created_at": (
+            user.created_at.isoformat()
+            if user.created_at
+            else None
+        ),
+        "updated_at": (
+            user.updated_at.isoformat()
+            if user.updated_at
+            else None
+        ),
+    }
+
+
+# ==========================
+# Parse Boolean Filter
+# ==========================
+def parse_boolean_filter(
+    value,
+    field_name,
+):
+    if value is None or value == "":
+        return None, None
+
+    normalized_value = (
+        str(value).strip().lower()
+    )
+
+    if normalized_value in {
+        "true",
+        "1",
+        "yes",
+    }:
+        return True, None
+
+    if normalized_value in {
+        "false",
+        "0",
+        "no",
+    }:
+        return False, None
+
+    return None, {
+        "success": False,
+        "message": (
+            f"{field_name} must be either "
+            "true or false."
+        ),
+    }
 
 
 # ==========================
@@ -89,13 +178,17 @@ def admin_dashboard():
         status="accepted",
     ).count()
 
-    in_progress_jobs = ServiceRequest.query.filter_by(
-        status="in_progress",
-    ).count()
+    in_progress_jobs = (
+        ServiceRequest.query.filter_by(
+            status="in_progress",
+        ).count()
+    )
 
-    confirmed_jobs = ServiceRequest.query.filter_by(
-        status="confirmed",
-    ).count()
+    confirmed_jobs = (
+        ServiceRequest.query.filter_by(
+            status="confirmed",
+        ).count()
+    )
 
     unclassified_jobs = (
         ServiceRequest.query.filter(
@@ -238,24 +331,7 @@ def admin_dashboard():
             },
         },
         "recent_users": [
-            {
-                "id": user.id,
-                "full_name": user.full_name,
-                "email": user.email,
-                "role": user.role,
-                "status": user.status,
-                "city": user.city,
-                "verified": user.verified,
-                "email_verified": (
-                    user.email_verified
-                ),
-                "is_pro": user.is_pro,
-                "created_at": (
-                    user.created_at.isoformat()
-                    if user.created_at
-                    else None
-                ),
-            }
+            serialize_admin_user(user)
             for user in recent_users
         ],
         "recent_jobs": [
@@ -305,4 +381,304 @@ def admin_dashboard():
             }
             for job in recent_jobs
         ],
+    }, 200
+
+
+# ==========================
+# Admin User Management
+# ==========================
+@admin_bp.route(
+    "/users",
+    methods=["GET"],
+)
+@admin_required
+def get_admin_users():
+    search = request.args.get(
+        "search",
+        "",
+    ).strip()
+
+    role = request.args.get(
+        "role",
+        "",
+    ).strip().lower()
+
+    status = request.args.get(
+        "status",
+        "",
+    ).strip().lower()
+
+    city = request.args.get(
+        "city",
+        "",
+    ).strip()
+
+    verified_value = request.args.get(
+        "verified",
+    )
+
+    email_verified_value = (
+        request.args.get(
+            "email_verified",
+        )
+    )
+
+    pro_value = request.args.get(
+        "is_pro",
+    )
+
+    # ==========================
+    # Pagination
+    # ==========================
+    try:
+        page = int(
+            request.args.get(
+                "page",
+                1,
+            ),
+        )
+    except (TypeError, ValueError):
+        return {
+            "success": False,
+            "message": (
+                "Page must be a valid integer."
+            ),
+        }, 400
+
+    try:
+        per_page = int(
+            request.args.get(
+                "per_page",
+                DEFAULT_PAGE_SIZE,
+            ),
+        )
+    except (TypeError, ValueError):
+        return {
+            "success": False,
+            "message": (
+                "Per-page must be a valid integer."
+            ),
+        }, 400
+
+    if page < 1:
+        return {
+            "success": False,
+            "message": (
+                "Page must be greater than zero."
+            ),
+        }, 400
+
+    if (
+        per_page < 1
+        or per_page > MAX_PAGE_SIZE
+    ):
+        return {
+            "success": False,
+            "message": (
+                "Per-page must be between "
+                f"1 and {MAX_PAGE_SIZE}."
+            ),
+        }, 400
+
+    # ==========================
+    # Validate Role and Status
+    # ==========================
+    if (
+        role
+        and role != "all"
+        and role not in VALID_USER_ROLES
+    ):
+        return {
+            "success": False,
+            "message": (
+                "Role must be customer, "
+                "artisan, or admin."
+            ),
+        }, 400
+
+    if (
+        status
+        and status != "all"
+        and status not in VALID_USER_STATUSES
+    ):
+        return {
+            "success": False,
+            "message": (
+                "Status must be active, "
+                "suspended, or banned."
+            ),
+        }, 400
+
+    verified, verified_error = (
+        parse_boolean_filter(
+            verified_value,
+            "Verified",
+        )
+    )
+
+    if verified_error:
+        return verified_error, 400
+
+    email_verified, email_error = (
+        parse_boolean_filter(
+            email_verified_value,
+            "Email verified",
+        )
+    )
+
+    if email_error:
+        return email_error, 400
+
+    is_pro, pro_error = (
+        parse_boolean_filter(
+            pro_value,
+            "Is pro",
+        )
+    )
+
+    if pro_error:
+        return pro_error, 400
+
+    # ==========================
+    # Build Query
+    # ==========================
+    query = User.query
+
+    if search:
+        search_pattern = f"%{search}%"
+
+        query = query.filter(
+            or_(
+                User.full_name.ilike(
+                    search_pattern,
+                ),
+                User.email.ilike(
+                    search_pattern,
+                ),
+                User.phone.ilike(
+                    search_pattern,
+                ),
+                User.city.ilike(
+                    search_pattern,
+                ),
+            ),
+        )
+
+    if role and role != "all":
+        query = query.filter(
+            User.role == role,
+        )
+
+    if status and status != "all":
+        query = query.filter(
+            User.status == status,
+        )
+
+    if city:
+        query = query.filter(
+            func.lower(
+                User.city,
+            )
+            == city.lower(),
+        )
+
+    if verified is not None:
+        query = query.filter(
+            User.verified == verified,
+        )
+
+    if email_verified is not None:
+        query = query.filter(
+            User.email_verified
+            == email_verified,
+        )
+
+    if is_pro is not None:
+        query = query.filter(
+            User.is_pro == is_pro,
+        )
+
+    query = query.order_by(
+        User.created_at.desc(),
+        User.id.desc(),
+    )
+
+    pagination = query.paginate(
+        page=page,
+        per_page=per_page,
+        error_out=False,
+    )
+
+    users = pagination.items
+
+    # ==========================
+    # Filter Options
+    # ==========================
+    available_cities = [
+        city_name
+        for (city_name,) in (
+            db.session.query(
+                User.city,
+            )
+            .filter(
+                User.city.isnot(None),
+                User.city != "",
+            )
+            .distinct()
+            .order_by(
+                User.city.asc(),
+            )
+            .all()
+        )
+    ]
+
+    return {
+        "success": True,
+        "message": (
+            "Users loaded successfully."
+        ),
+        "users": [
+            serialize_admin_user(user)
+            for user in users
+        ],
+        "pagination": {
+            "page": pagination.page,
+            "per_page": pagination.per_page,
+            "total": pagination.total,
+            "pages": pagination.pages,
+            "has_next": pagination.has_next,
+            "has_previous": (
+                pagination.has_prev
+            ),
+            "next_page": (
+                pagination.next_num
+                if pagination.has_next
+                else None
+            ),
+            "previous_page": (
+                pagination.prev_num
+                if pagination.has_prev
+                else None
+            ),
+        },
+        "filters": {
+            "search": search,
+            "role": role or "all",
+            "status": status or "all",
+            "city": city,
+            "verified": verified,
+            "email_verified": (
+                email_verified
+            ),
+            "is_pro": is_pro,
+        },
+        "filter_options": {
+            "roles": sorted(
+                VALID_USER_ROLES,
+            ),
+            "statuses": sorted(
+                VALID_USER_STATUSES,
+            ),
+            "cities": available_cities,
+        },
     }, 200
