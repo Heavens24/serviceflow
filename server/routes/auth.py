@@ -1,11 +1,15 @@
 from flask import Blueprint, request
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import (
+    get_jwt_identity,
+    jwt_required,
+)
 
 from models.user import User
 from services.auth_service import (
-    register_user,
     login_user,
+    register_user,
 )
+
 
 auth_bp = Blueprint(
     "auth",
@@ -17,68 +21,123 @@ auth_bp = Blueprint(
 # ==========================
 # Register
 # ==========================
-@auth_bp.route("/register", methods=["POST"])
+@auth_bp.route(
+    "/register",
+    methods=["POST"],
+)
 def register():
-    data = request.get_json()
+    data = request.get_json(
+        silent=True,
+    )
 
-    if not data:
+    if not isinstance(data, dict):
         return {
             "success": False,
-            "message": "Request body is required.",
+            "message": (
+                "A valid JSON request body "
+                "is required."
+            ),
         }, 400
 
-    result = register_user(data)
+    result, status_code = register_user(
+        data,
+    )
 
-    status = 201 if result["success"] else 400
-
-    return result, status
+    return result, status_code
 
 
 # ==========================
 # Login
 # ==========================
-@auth_bp.route("/login", methods=["POST"])
+@auth_bp.route(
+    "/login",
+    methods=["POST"],
+)
 def login():
-    data = request.get_json()
+    data = request.get_json(
+        silent=True,
+    )
 
-    if not data:
+    if not isinstance(data, dict):
         return {
             "success": False,
-            "message": "Request body is required.",
+            "message": (
+                "A valid JSON request body "
+                "is required."
+            ),
         }, 400
 
-    result = login_user(data)
+    result, status_code = login_user(
+        data,
+    )
 
-    status = 200 if result["success"] else 401
-
-    return result, status
+    return result, status_code
 
 
 # ==========================
 # Current Logged-in User
 # ==========================
-@auth_bp.route("/me", methods=["GET"])
+@auth_bp.route(
+    "/me",
+    methods=["GET"],
+)
 @jwt_required()
 def current_user():
-
     user_id = get_jwt_identity()
 
-    user = User.query.get(int(user_id))
+    try:
+        normalized_user_id = int(
+            user_id,
+        )
+    except (TypeError, ValueError):
+        return {
+            "success": False,
+            "message": (
+                "The authentication identity "
+                "is invalid."
+            ),
+        }, 401
+
+    user = User.query.get(
+        normalized_user_id,
+    )
 
     if not user:
         return {
             "success": False,
-            "message": "User not found."
+            "message": "User not found.",
         }, 404
+
+    if user.is_banned:
+        return {
+            "success": False,
+            "message": (
+                "This account has been banned. "
+                "Please contact ServiceFlow support."
+            ),
+            "account_status": user.status,
+        }, 403
+
+    if user.is_suspended:
+        return {
+            "success": False,
+            "message": (
+                "This account is currently suspended. "
+                "Please contact ServiceFlow support."
+            ),
+            "account_status": user.status,
+        }, 403
+
+    if not user.is_active:
+        return {
+            "success": False,
+            "message": (
+                "This account is not currently active."
+            ),
+            "account_status": user.status,
+        }, 403
 
     return {
         "success": True,
-        "user": {
-            "id": user.id,
-            "full_name": user.full_name,
-            "email": user.email,
-            "phone": user.phone,
-            "city": user.city,
-            "role": user.role,
-        },
+        "user": user.to_dict(),
     }, 200
