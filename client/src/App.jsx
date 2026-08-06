@@ -23,6 +23,7 @@ import Register from "./pages/Register";
 import Services from "./pages/Services";
 
 import AdminDashboard from "./pages/admin/AdminDashboard";
+import AdminUsers from "./pages/admin/AdminUsers";
 
 function App() {
   return (
@@ -185,6 +186,15 @@ function App() {
         element={
           <AdminRoute>
             <AdminDashboard />
+          </AdminRoute>
+        }
+      />
+
+      <Route
+        path="/admin/users"
+        element={
+          <AdminRoute>
+            <AdminUsers />
           </AdminRoute>
         }
       />
