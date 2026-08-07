@@ -1,5 +1,6 @@
 import api from "./api";
 
+
 function buildQuery(params = {}) {
   const query = new URLSearchParams();
 
@@ -24,6 +25,7 @@ function buildQuery(params = {}) {
   return query.toString();
 }
 
+
 const adminService = {
   // ==========================
   // Admin Dashboard
@@ -35,6 +37,7 @@ const adminService = {
 
     return data;
   },
+
 
   // ==========================
   // Admin Users
@@ -54,6 +57,7 @@ const adminService = {
     return data;
   },
 
+
   // ==========================
   // Update User Status
   // ==========================
@@ -70,6 +74,7 @@ const adminService = {
 
     return data;
   },
+
 
   // ==========================
   // Update User Verification
@@ -104,6 +109,7 @@ const adminService = {
     return data;
   },
 
+
   // ==========================
   // Update User Role
   // ==========================
@@ -120,6 +126,7 @@ const adminService = {
 
     return data;
   },
+
 
   // ==========================
   // Admin Jobs
@@ -139,6 +146,7 @@ const adminService = {
     return data;
   },
 
+
   // ==========================
   // Get One Admin Job
   // ==========================
@@ -149,6 +157,7 @@ const adminService = {
 
     return data;
   },
+
 
   // ==========================
   // Update Job Status
@@ -167,6 +176,7 @@ const adminService = {
     return data;
   },
 
+
   // ==========================
   // Delete Job
   // ==========================
@@ -177,6 +187,50 @@ const adminService = {
 
     return data;
   },
+
+
+  // ==========================
+  // Admin Reviews
+  // ==========================
+  async getReviews(params = {}) {
+    const queryString =
+      buildQuery(params);
+
+    const endpoint = queryString
+      ? `/api/admin/reviews?${queryString}`
+      : "/api/admin/reviews";
+
+    const { data } = await api.get(
+      endpoint,
+    );
+
+    return data;
+  },
+
+
+  // ==========================
+  // Get One Admin Review
+  // ==========================
+  async getReview(reviewId) {
+    const { data } = await api.get(
+      `/api/admin/reviews/${reviewId}`,
+    );
+
+    return data;
+  },
+
+
+  // ==========================
+  // Delete Admin Review
+  // ==========================
+  async deleteReview(reviewId) {
+    const { data } = await api.delete(
+      `/api/admin/reviews/${reviewId}`,
+    );
+
+    return data;
+  },
 };
+
 
 export default adminService;

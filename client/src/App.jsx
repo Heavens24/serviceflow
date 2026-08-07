@@ -24,6 +24,7 @@ import Services from "./pages/Services";
 
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminJobs from "./pages/admin/AdminJobs";
+import AdminReviews from "./pages/admin/AdminReviews";
 import AdminUsers from "./pages/admin/AdminUsers";
 
 function App() {
@@ -205,6 +206,15 @@ function App() {
         element={
           <AdminRoute>
             <AdminJobs />
+          </AdminRoute>
+        }
+      />
+
+      <Route
+        path="/admin/reviews"
+        element={
+          <AdminRoute>
+            <AdminReviews />
           </AdminRoute>
         }
       />

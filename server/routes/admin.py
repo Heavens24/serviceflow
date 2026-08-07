@@ -1885,3 +1885,449 @@ def delete_admin_job(job_id):
         ),
         "job": deleted_job,
     }, 200
+
+
+# ==========================
+# Serialize Review User
+# ==========================
+def serialize_review_user(user):
+    if not user:
+        return None
+
+    return {
+        "id": user.id,
+        "full_name": user.full_name,
+        "email": user.email,
+        "phone": user.phone,
+        "city": user.city,
+        "role": user.role,
+        "status": user.status,
+        "verified": user.verified,
+    }
+
+
+# ==========================
+# Serialize Review Job
+# ==========================
+def serialize_review_job(job):
+    if not job:
+        return None
+
+    return {
+        "id": job.id,
+        "title": job.title,
+        "description": job.description,
+        "category": job.category,
+        "location": job.location,
+        "budget": float(job.budget or 0),
+        "status": job.status,
+        "customer_id": job.customer_id,
+        "artisan_id": job.artisan_id,
+        "created_at": (
+            job.created_at.isoformat()
+            if job.created_at
+            else None
+        ),
+        "confirmed_at": (
+            job.confirmed_at.isoformat()
+            if job.confirmed_at
+            else None
+        ),
+    }
+
+
+# ==========================
+# Serialize Admin Review
+# ==========================
+def serialize_admin_review(review):
+    return {
+        "id": review.id,
+        "rating": review.rating,
+        "comment": review.comment,
+        "customer_id": review.customer_id,
+        "artisan_id": review.artisan_id,
+        "service_request_id": (
+            review.service_request_id
+        ),
+        "customer": serialize_review_user(
+            review.customer,
+        ),
+        "artisan": serialize_review_user(
+            review.artisan,
+        ),
+        "job": serialize_review_job(
+            review.service_request,
+        ),
+        "created_at": (
+            review.created_at.isoformat()
+            if review.created_at
+            else None
+        ),
+    }
+
+
+# ==========================
+# Admin Review Management
+# ==========================
+@admin_bp.route(
+    "/reviews",
+    methods=["GET"],
+)
+@admin_required
+def get_admin_reviews():
+    search = request.args.get(
+        "search",
+        "",
+    ).strip()
+
+    sort = request.args.get(
+        "sort",
+        "newest",
+    ).strip().lower()
+
+    rating, rating_error = parse_optional_integer(
+        request.args.get("rating"),
+        "Rating",
+    )
+
+    if rating_error:
+        return rating_error, 400
+
+    if (
+        rating is not None
+        and rating not in {1, 2, 3, 4, 5}
+    ):
+        return {
+            "success": False,
+            "message": (
+                "Rating must be between 1 and 5."
+            ),
+        }, 400
+
+    customer_id, customer_error = (
+        parse_optional_integer(
+            request.args.get("customer_id"),
+            "Customer ID",
+        )
+    )
+
+    if customer_error:
+        return customer_error, 400
+
+    artisan_id, artisan_error = (
+        parse_optional_integer(
+            request.args.get("artisan_id"),
+            "Artisan ID",
+        )
+    )
+
+    if artisan_error:
+        return artisan_error, 400
+
+    service_request_id, job_error = (
+        parse_optional_integer(
+            request.args.get(
+                "service_request_id",
+            ),
+            "Service request ID",
+        )
+    )
+
+    if job_error:
+        return job_error, 400
+
+    page, page_error = parse_optional_integer(
+        request.args.get("page", 1),
+        "Page",
+    )
+
+    if page_error:
+        return page_error, 400
+
+    per_page, per_page_error = (
+        parse_optional_integer(
+            request.args.get(
+                "per_page",
+                DEFAULT_PAGE_SIZE,
+            ),
+            "Per-page",
+        )
+    )
+
+    if per_page_error:
+        return per_page_error, 400
+
+    if per_page > MAX_PAGE_SIZE:
+        return {
+            "success": False,
+            "message": (
+                "Per-page must be between "
+                f"1 and {MAX_PAGE_SIZE}."
+            ),
+        }, 400
+
+    valid_sort_options = {
+        "newest",
+        "oldest",
+        "rating_high",
+        "rating_low",
+    }
+
+    if sort not in valid_sort_options:
+        return {
+            "success": False,
+            "message": (
+                "Sort must be newest, oldest, "
+                "rating_high, or rating_low."
+            ),
+        }, 400
+
+    query = Review.query
+
+    if search:
+        search_pattern = f"%{search}%"
+
+        query = query.filter(
+            or_(
+                Review.comment.ilike(
+                    search_pattern,
+                ),
+                Review.customer.has(
+                    or_(
+                        User.full_name.ilike(
+                            search_pattern,
+                        ),
+                        User.email.ilike(
+                            search_pattern,
+                        ),
+                    ),
+                ),
+                Review.artisan.has(
+                    or_(
+                        User.full_name.ilike(
+                            search_pattern,
+                        ),
+                        User.email.ilike(
+                            search_pattern,
+                        ),
+                    ),
+                ),
+                Review.service_request.has(
+                    or_(
+                        ServiceRequest.title.ilike(
+                            search_pattern,
+                        ),
+                        ServiceRequest.description.ilike(
+                            search_pattern,
+                        ),
+                        ServiceRequest.category.ilike(
+                            search_pattern,
+                        ),
+                        ServiceRequest.location.ilike(
+                            search_pattern,
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+    if rating is not None:
+        query = query.filter(
+            Review.rating == rating,
+        )
+
+    if customer_id is not None:
+        query = query.filter(
+            Review.customer_id == customer_id,
+        )
+
+    if artisan_id is not None:
+        query = query.filter(
+            Review.artisan_id == artisan_id,
+        )
+
+    if service_request_id is not None:
+        query = query.filter(
+            Review.service_request_id
+            == service_request_id,
+        )
+
+    matching_reviews = query.count()
+
+    matching_average = (
+        query.with_entities(
+            func.avg(Review.rating),
+        ).scalar()
+    )
+
+    matching_average = (
+        round(float(matching_average), 1)
+        if matching_average is not None
+        else 0
+    )
+
+    rating_breakdown = {
+        str(number): query.filter(
+            Review.rating == number,
+        ).count()
+        for number in range(1, 6)
+    }
+
+    if sort == "oldest":
+        query = query.order_by(
+            Review.created_at.asc(),
+            Review.id.asc(),
+        )
+    elif sort == "rating_high":
+        query = query.order_by(
+            Review.rating.desc(),
+            Review.created_at.desc(),
+        )
+    elif sort == "rating_low":
+        query = query.order_by(
+            Review.rating.asc(),
+            Review.created_at.desc(),
+        )
+    else:
+        query = query.order_by(
+            Review.created_at.desc(),
+            Review.id.desc(),
+        )
+
+    pagination = query.paginate(
+        page=page,
+        per_page=per_page,
+        error_out=False,
+    )
+
+    return {
+        "success": True,
+        "message": "Reviews loaded successfully.",
+        "reviews": [
+            serialize_admin_review(review)
+            for review in pagination.items
+        ],
+        "summary": {
+            "matching_reviews": matching_reviews,
+            "average_rating": matching_average,
+            "rating_breakdown": rating_breakdown,
+        },
+        "pagination": {
+            "page": pagination.page,
+            "per_page": pagination.per_page,
+            "total": pagination.total,
+            "pages": pagination.pages,
+            "has_next": pagination.has_next,
+            "has_previous": pagination.has_prev,
+            "next_page": (
+                pagination.next_num
+                if pagination.has_next
+                else None
+            ),
+            "previous_page": (
+                pagination.prev_num
+                if pagination.has_prev
+                else None
+            ),
+        },
+        "filters": {
+            "search": search,
+            "rating": rating,
+            "customer_id": customer_id,
+            "artisan_id": artisan_id,
+            "service_request_id": (
+                service_request_id
+            ),
+            "sort": sort,
+        },
+        "filter_options": {
+            "ratings": [1, 2, 3, 4, 5],
+            "sorts": [
+                "newest",
+                "oldest",
+                "rating_high",
+                "rating_low",
+            ],
+        },
+    }, 200
+
+
+# ==========================
+# Get One Admin Review
+# ==========================
+@admin_bp.route(
+    "/reviews/<int:review_id>",
+    methods=["GET"],
+)
+@admin_required
+def get_admin_review(review_id):
+    review = db.session.get(
+        Review,
+        review_id,
+    )
+
+    if not review:
+        return {
+            "success": False,
+            "message": "Review not found.",
+        }, 404
+
+    return {
+        "success": True,
+        "message": "Review loaded successfully.",
+        "review": serialize_admin_review(
+            review,
+        ),
+    }, 200
+
+
+# ==========================
+# Delete Admin Review
+# ==========================
+@admin_bp.route(
+    "/reviews/<int:review_id>",
+    methods=["DELETE"],
+)
+@admin_required
+def delete_admin_review(review_id):
+    review = db.session.get(
+        Review,
+        review_id,
+    )
+
+    if not review:
+        return {
+            "success": False,
+            "message": "Review not found.",
+        }, 404
+
+    deleted_review = {
+        "id": review.id,
+        "rating": review.rating,
+        "comment": review.comment,
+        "customer_id": review.customer_id,
+        "artisan_id": review.artisan_id,
+        "service_request_id": (
+            review.service_request_id
+        ),
+    }
+
+    try:
+        db.session.delete(review)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+        return {
+            "success": False,
+            "message": (
+                "Unable to delete the review "
+                "right now."
+            ),
+        }, 500
+
+    return {
+        "success": True,
+        "message": "Review deleted successfully.",
+        "review": deleted_review,
+    }, 200
