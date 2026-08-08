@@ -6,6 +6,7 @@ from database import db
 from models.service_request import ServiceRequest
 from models.user import User
 from services.notification_service import create_notification
+from services.wallet_service import release_confirmed_job_earnings
 
 
 # ==========================
@@ -751,39 +752,78 @@ def confirm_service_request(request_id, customer_id):
             "status_code": 409,
         }
 
-    service_request.status = "confirmed"
-    service_request.confirmed_at = datetime.utcnow()
-
     try:
+        release_result = release_confirmed_job_earnings(
+            service_request,
+            commit=False,
+        )
+
+        if not release_result.get("success"):
+            db.session.rollback()
+
+            return {
+                "success": False,
+                "message": release_result.get(
+                    "message",
+                    "Unable to release the artisan's earnings.",
+                ),
+                "status_code": release_result.get(
+                    "status_code",
+                    409,
+                ),
+            }
+
+        service_request.status = "confirmed"
+        service_request.confirmed_at = datetime.utcnow()
+
         create_notification(
             user_id=service_request.artisan_id,
             title="Completion confirmed",
             message=(
                 f'The customer confirmed completion of '
-                f'"{service_request.title}".'
+                f'"{service_request.title}". '
+                f"Your earnings are now available."
             ),
             notification_type="completion_confirmed",
             commit=False,
         )
 
         db.session.commit()
+
     except Exception:
         db.session.rollback()
 
         return {
             "success": False,
-            "message": "Unable to confirm this job.",
+            "message": (
+                "Unable to confirm this job and "
+                "release the artisan's earnings."
+            ),
             "status_code": 500,
         }
 
     return {
         "success": True,
-        "message": "Job confirmed successfully.",
+        "message": (
+            "Job confirmed successfully. "
+            "The artisan's earnings are now available."
+        ),
         "service_request": service_request_to_dict(
             service_request,
         ),
+        "earnings_release": {
+            "already_released": release_result.get(
+                "already_released",
+                False,
+            ),
+            "wallet": release_result.get(
+                "wallet_data",
+            ),
+            "transaction": release_result.get(
+                "transaction_data",
+            ),
+        },
     }
-
 
 # ==========================
 # Get Customer Requests
