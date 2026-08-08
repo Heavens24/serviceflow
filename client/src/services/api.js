@@ -1,8 +1,13 @@
 import axios from "axios";
 
+const isDevelopment =
+  import.meta.env.DEV;
+
 const API_URL =
   import.meta.env.VITE_API_URL ||
-  "https://serviceflow-s6en.onrender.com";
+  (isDevelopment
+    ? "http://127.0.0.1:5001"
+    : "https://serviceflow-s6en.onrender.com");
 
 const api = axios.create({
   baseURL: API_URL,
@@ -12,27 +17,51 @@ const api = axios.create({
   timeout: 30000,
 });
 
-// Add the JWT to every authenticated request.
+// ==========================
+// Request Interceptor
+// ==========================
+// Attach the JWT to authenticated
+// API requests automatically.
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem("serviceflow_access_token");
+    const token =
+      localStorage.getItem(
+        "serviceflow_access_token",
+      );
 
     if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+      config.headers =
+        config.headers || {};
+
+      config.headers.Authorization =
+        `Bearer ${token}`;
     }
 
     return config;
   },
-  (error) => Promise.reject(error),
+  (error) =>
+    Promise.reject(error),
 );
 
-// Remove expired or invalid authentication data.
+// ==========================
+// Response Interceptor
+// ==========================
+// Remove authentication data when
+// the backend reports that the session
+// is no longer authorized.
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem("serviceflow_access_token");
-      localStorage.removeItem("serviceflow_user");
+    if (
+      error.response?.status === 401
+    ) {
+      localStorage.removeItem(
+        "serviceflow_access_token",
+      );
+
+      localStorage.removeItem(
+        "serviceflow_user",
+      );
     }
 
     return Promise.reject(error);

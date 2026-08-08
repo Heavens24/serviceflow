@@ -36,6 +36,7 @@ from routes.customer_profile import (
 from routes.dashboard import dashboard_bp
 from routes.message import message_bp
 from routes.notification import notification_bp
+from routes.payment import payment_bp
 from routes.review import review_bp
 from routes.service_request import (
     service_request_bp,
@@ -227,6 +228,10 @@ app.register_blueprint(
 
 app.register_blueprint(
     wallet_bp,
+)
+
+app.register_blueprint(
+    payment_bp,
 )
 
 

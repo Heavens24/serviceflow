@@ -19,6 +19,7 @@ import MyJobs from "./pages/MyJobs";
 import MyRequests from "./pages/MyRequests";
 import NotFound from "./pages/NotFound";
 import Notifications from "./pages/Notifications";
+import PaymentSuccess from "./pages/PaymentSuccess";
 import Register from "./pages/Register";
 import Services from "./pages/Services";
 
@@ -26,6 +27,7 @@ import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminJobs from "./pages/admin/AdminJobs";
 import AdminReviews from "./pages/admin/AdminReviews";
 import AdminUsers from "./pages/admin/AdminUsers";
+
 
 function App() {
   return (
@@ -130,6 +132,18 @@ function App() {
       />
 
       {/* ==========================
+          Payment Routes
+      ========================== */}
+      <Route
+        path="/payment/success"
+        element={
+          <ProtectedRoute>
+            <PaymentSuccess />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* ==========================
           Artisan Profile Routes
       ========================== */}
       <Route
@@ -229,5 +243,6 @@ function App() {
     </Routes>
   );
 }
+
 
 export default App;
