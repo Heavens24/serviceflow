@@ -7,7 +7,6 @@ class User(db.Model):
     # ==========================================
     # Primary Key
     # ==========================================
-
     id = db.Column(
         db.Integer,
         primary_key=True,
@@ -16,7 +15,6 @@ class User(db.Model):
     # ==========================================
     # Basic Information
     # ==========================================
-
     full_name = db.Column(
         db.String(100),
         nullable=False,
@@ -47,7 +45,6 @@ class User(db.Model):
     # ==========================================
     # Account Role
     # ==========================================
-
     # customer
     # artisan
     # admin
@@ -61,7 +58,6 @@ class User(db.Model):
     # ==========================================
     # Account Status
     # ==========================================
-
     # active
     # suspended
     # banned
@@ -75,7 +71,6 @@ class User(db.Model):
     # ==========================================
     # Verification
     # ==========================================
-
     email_verified = db.Column(
         db.Boolean,
         nullable=False,
@@ -91,7 +86,6 @@ class User(db.Model):
     # ==========================================
     # Future Subscription Support
     # ==========================================
-
     is_pro = db.Column(
         db.Boolean,
         nullable=False,
@@ -101,7 +95,6 @@ class User(db.Model):
     # ==========================================
     # Audit
     # ==========================================
-
     created_at = db.Column(
         db.DateTime,
         server_default=db.func.now(),
@@ -114,9 +107,8 @@ class User(db.Model):
     )
 
     # ==========================================
-    # Relationships
+    # Service Request Relationships
     # ==========================================
-
     customer_requests = db.relationship(
         "ServiceRequest",
         foreign_keys="ServiceRequest.customer_id",
@@ -129,6 +121,9 @@ class User(db.Model):
         lazy=True,
     )
 
+    # ==========================================
+    # Review Relationships
+    # ==========================================
     reviews_given = db.relationship(
         "Review",
         foreign_keys="Review.customer_id",
@@ -143,6 +138,9 @@ class User(db.Model):
         lazy=True,
     )
 
+    # ==========================================
+    # Message Relationships
+    # ==========================================
     sent_messages = db.relationship(
         "Message",
         foreign_keys="Message.sender_id",
@@ -157,6 +155,9 @@ class User(db.Model):
         lazy=True,
     )
 
+    # ==========================================
+    # Profile Relationships
+    # ==========================================
     artisan_profile = db.relationship(
         "ArtisanProfile",
         back_populates="user",
@@ -171,6 +172,9 @@ class User(db.Model):
         cascade="all, delete-orphan",
     )
 
+    # ==========================================
+    # Notification Relationships
+    # ==========================================
     notifications = db.relationship(
         "Notification",
         back_populates="user",
@@ -179,9 +183,29 @@ class User(db.Model):
     )
 
     # ==========================================
+    # Finance Relationships
+    # ==========================================
+    #
+    # These are created automatically by the
+    # backrefs defined in the finance models:
+    #
+    # Wallet:
+    #   user.wallet
+    #
+    # Transaction:
+    #   user.customer_transactions
+    #   user.artisan_transactions
+    #
+    # Withdrawal:
+    #   user.withdrawal_requests
+    #   user.approved_withdrawals
+    #
+    # Do not redefine them here while the
+    # finance models use backref.
+
+    # ==========================================
     # Helper Properties
     # ==========================================
-
     @property
     def is_admin(self):
         return self.role == "admin"
@@ -209,7 +233,6 @@ class User(db.Model):
     # ==========================================
     # Serialization
     # ==========================================
-
     def to_dict(self):
         return {
             "id": self.id,
@@ -220,7 +243,9 @@ class User(db.Model):
             "role": self.role,
             "status": self.status,
             "verified": self.verified,
-            "email_verified": self.email_verified,
+            "email_verified": (
+                self.email_verified
+            ),
             "is_pro": self.is_pro,
             "created_at": (
                 self.created_at.isoformat()

@@ -15,13 +15,16 @@ from models import (
     Notification,
     Review,
     ServiceRequest,
+    Transaction,
     User,
+    Wallet,
+    Withdrawal,
 )
-
 
 # ==========================
 # Import Routes
 # ==========================
+
 from routes.admin import admin_bp
 from routes.artisan_profile import (
     artisan_profile_bp,
@@ -37,11 +40,13 @@ from routes.review import review_bp
 from routes.service_request import (
     service_request_bp,
 )
+from routes.wallet import wallet_bp
 
 
 # ==========================
 # Create Flask App
 # ==========================
+
 app = Flask(__name__)
 app.config.from_object(Config)
 
@@ -49,6 +54,7 @@ app.config.from_object(Config)
 # ==========================
 # Configure CORS
 # ==========================
+
 CORS(
     app,
     resources={
@@ -82,6 +88,7 @@ CORS(
 # ==========================
 # Initialize Extensions
 # ==========================
+
 db.init_app(app)
 
 jwt = JWTManager(app)
@@ -95,6 +102,7 @@ migrate = Migrate(
 # ==========================
 # JWT Error Responses
 # ==========================
+
 @jwt.unauthorized_loader
 def missing_token_callback(
     error_message,
@@ -180,6 +188,7 @@ def token_verification_failed_callback(
 # ==========================
 # Register Blueprints
 # ==========================
+
 app.register_blueprint(
     auth_bp,
 )
@@ -216,10 +225,15 @@ app.register_blueprint(
     admin_bp,
 )
 
+app.register_blueprint(
+    wallet_bp,
+)
+
 
 # ==========================
 # Home Route
 # ==========================
+
 @app.route(
     "/",
     methods=["GET"],
@@ -240,6 +254,7 @@ def home():
 # ==========================
 # Health Check
 # ==========================
+
 @app.route(
     "/health",
     methods=["GET"],
@@ -267,6 +282,7 @@ def health():
 # ==========================
 # API Not Found Handler
 # ==========================
+
 @app.errorhandler(404)
 def not_found(error):
     return {
@@ -281,6 +297,7 @@ def not_found(error):
 # ==========================
 # Method Not Allowed Handler
 # ==========================
+
 @app.errorhandler(405)
 def method_not_allowed(error):
     return {
@@ -295,6 +312,7 @@ def method_not_allowed(error):
 # ==========================
 # Request Too Large Handler
 # ==========================
+
 @app.errorhandler(413)
 def request_too_large(error):
     return {
@@ -309,6 +327,7 @@ def request_too_large(error):
 # ==========================
 # Internal Server Error
 # ==========================
+
 @app.errorhandler(500)
 def internal_server_error(error):
     db.session.rollback()
@@ -324,6 +343,7 @@ def internal_server_error(error):
 # ==========================
 # Run Application Locally
 # ==========================
+
 if __name__ == "__main__":
     port = int(
         os.getenv(
