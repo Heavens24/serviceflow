@@ -1,13 +1,14 @@
 import axios from "axios";
 
-const isDevelopment =
-  import.meta.env.DEV;
+const isDevelopment = import.meta.env.DEV;
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
-  (isDevelopment
-    ? "http://127.0.0.1:5000"
-    : "https://serviceflow-s6en.onrender.com");
+  (
+    isDevelopment
+      ? "http://127.0.0.1:5000"
+      : "https://serviceflow-s6en.onrender.com"
+  );
 
 const api = axios.create({
   baseURL: API_URL,
@@ -20,8 +21,8 @@ const api = axios.create({
 // ==========================
 // Request Interceptor
 // ==========================
-// Attach the JWT to authenticated
-// API requests automatically.
+// Attach the JWT automatically
+// to authenticated API requests.
 api.interceptors.request.use(
   (config) => {
     const token =
@@ -46,9 +47,9 @@ api.interceptors.request.use(
 // ==========================
 // Response Interceptor
 // ==========================
-// Remove authentication data when
-// the backend reports that the session
-// is no longer authorized.
+// Clear local authentication when
+// the backend reports an expired or
+// unauthorized session.
 api.interceptors.response.use(
   (response) => response,
   (error) => {
