@@ -313,6 +313,15 @@ function Dashboard() {
                     </Link>
 
                     <Link
+                      to="/wallet"
+                      style={
+                        styles.notificationAction
+                      }
+                    >
+                      Wallet & payouts
+                    </Link>
+
+                    <Link
                       to="/artisan-profile"
                       style={
                         styles.profileAction

@@ -16,6 +16,13 @@ from services.wallet_service import (
 )
 
 
+from services.payout_account_service import (
+    get_payout_account,
+    get_south_african_banks,
+    save_payout_account,
+    validate_south_african_bank_account,
+)
+
 wallet_bp = Blueprint(
     "wallet",
     __name__,
@@ -158,6 +165,436 @@ def get_wallet():
             result["wallet_data"]
         ),
     }, 200
+
+
+# ==========================
+# Get Supported SA Banks
+# ==========================
+@wallet_bp.route(
+    "/wallet/payout-banks",
+    methods=["GET"],
+)
+@jwt_required()
+def get_wallet_payout_banks():
+    artisan, error_response, status_code = (
+        get_current_artisan()
+    )
+
+    if error_response:
+        return (
+            error_response,
+            status_code,
+        )
+
+    result = get_south_african_banks()
+
+    if not result.get("success"):
+        return {
+            "success": False,
+            "message": result.get(
+                "message",
+                "Unable to load payout banks.",
+            ),
+        }, result.get(
+            "status_code",
+            400,
+        )
+
+    return {
+        "success": True,
+        "message": result.get(
+            "message",
+            "South African banks loaded successfully.",
+        ),
+        "banks": result.get(
+            "banks",
+            [],
+        ),
+        "count": result.get(
+            "count",
+            0,
+        ),
+    }, 200
+
+
+# ==========================
+# Get Payout Account
+# ==========================
+@wallet_bp.route(
+    "/wallet/payout-account",
+    methods=["GET"],
+)
+@jwt_required()
+def get_wallet_payout_account():
+    artisan, error_response, status_code = (
+        get_current_artisan()
+    )
+
+    if error_response:
+        return (
+            error_response,
+            status_code,
+        )
+
+    result = get_payout_account(
+        artisan.id,
+    )
+
+    if not result.get("success"):
+        return {
+            "success": False,
+            "message": result.get(
+                "message",
+                "Unable to load payout account.",
+            ),
+        }, result.get(
+            "status_code",
+            400,
+        )
+
+    return {
+        "success": True,
+        "message": result.get(
+            "message",
+            "Payout account loaded successfully.",
+        ),
+        "payout_account": result.get(
+            "payout_account_data",
+        ),
+    }, 200
+
+
+# ==========================
+# Validate Payout Account
+# ==========================
+@wallet_bp.route(
+    "/wallet/payout-account/validate",
+    methods=["POST"],
+)
+@jwt_required()
+def validate_wallet_payout_account():
+    artisan, error_response, status_code = (
+        get_current_artisan()
+    )
+
+    if error_response:
+        return (
+            error_response,
+            status_code,
+        )
+
+    data = request.get_json(
+        silent=True,
+    )
+
+    if not data:
+        return {
+            "success": False,
+            "message": (
+                "Request body is required."
+            ),
+        }, 400
+
+    account_name = str(
+        data.get(
+            "account_name",
+            "",
+        )
+        or ""
+    ).strip()
+
+    account_number = str(
+        data.get(
+            "account_number",
+            "",
+        )
+        or ""
+    ).strip()
+
+    account_type = str(
+        data.get(
+            "account_type",
+            "",
+        )
+        or ""
+    ).strip().lower()
+
+    bank_code = str(
+        data.get(
+            "bank_code",
+            "",
+        )
+        or ""
+    ).strip()
+
+    document_type = str(
+        data.get(
+            "document_type",
+            "",
+        )
+        or ""
+    ).strip()
+
+    document_number = str(
+        data.get(
+            "document_number",
+            "",
+        )
+        or ""
+    ).strip()
+
+    result = (
+        validate_south_african_bank_account(
+            account_name=account_name,
+            account_number=account_number,
+            account_type=account_type,
+            bank_code=bank_code,
+            document_type=document_type,
+            document_number=(
+                document_number
+                or None
+            ),
+        )
+    )
+
+    if not result.get("success"):
+        response = {
+            "success": False,
+            "message": result.get(
+                "message",
+                (
+                    "Unable to validate payout "
+                    "account."
+                ),
+            ),
+        }
+
+        if result.get("validation"):
+            response["validation"] = (
+                result["validation"]
+            )
+
+        return response, result.get(
+            "status_code",
+            400,
+        )
+
+    return {
+        "success": True,
+        "message": result.get(
+            "message",
+            (
+                "Payout account validated "
+                "successfully."
+            ),
+        ),
+        "validation": result.get(
+            "validation",
+        ),
+    }, 200
+
+
+# ==========================
+# Create / Update Payout Account
+# ==========================
+@wallet_bp.route(
+    "/wallet/payout-account",
+    methods=["PUT"],
+)
+@jwt_required()
+def update_wallet_payout_account():
+    artisan, error_response, status_code = (
+        get_current_artisan()
+    )
+
+    if error_response:
+        return (
+            error_response,
+            status_code,
+        )
+
+    data = request.get_json(
+        silent=True,
+    )
+
+    if not data:
+        return {
+            "success": False,
+            "message": (
+                "Request body is required."
+            ),
+        }, 400
+
+    bank_name = str(
+        data.get(
+            "bank_name",
+            "",
+        )
+        or ""
+    ).strip()
+
+    bank_code = str(
+        data.get(
+            "bank_code",
+            "",
+        )
+        or ""
+    ).strip()
+
+    account_number = str(
+        data.get(
+            "account_number",
+            "",
+        )
+        or ""
+    ).strip()
+
+    account_name = str(
+        data.get(
+            "account_name",
+            "",
+        )
+        or ""
+    ).strip()
+
+    account_type = str(
+        data.get(
+            "account_type",
+            "",
+        )
+        or ""
+    ).strip().lower()
+
+    document_type = str(
+        data.get(
+            "document_type",
+            "",
+        )
+        or ""
+    ).strip()
+
+    document_number = str(
+        data.get(
+            "document_number",
+            "",
+        )
+        or ""
+    ).strip()
+
+    currency = str(
+        data.get(
+            "currency",
+            "ZAR",
+        )
+        or "ZAR"
+    ).strip().upper()
+
+    if not bank_name:
+        return {
+            "success": False,
+            "message": (
+                "Bank name is required."
+            ),
+        }, 400
+
+    if not bank_code:
+        return {
+            "success": False,
+            "message": (
+                "Bank code is required."
+            ),
+        }, 400
+
+    if not account_number:
+        return {
+            "success": False,
+            "message": (
+                "Account number is required."
+            ),
+        }, 400
+
+    if not account_name:
+        return {
+            "success": False,
+            "message": (
+                "Account holder name is required."
+            ),
+        }, 400
+
+    if not account_type:
+        return {
+            "success": False,
+            "message": (
+                "Account type is required."
+            ),
+        }, 400
+
+    if not document_type:
+        return {
+            "success": False,
+            "message": (
+                "Document type is required."
+            ),
+        }, 400
+
+    result = save_payout_account(
+        artisan_id=artisan.id,
+        bank_name=bank_name,
+        bank_code=bank_code,
+        account_number=account_number,
+        account_name=account_name,
+        account_type=account_type,
+        document_type=document_type,
+        document_number=(
+            document_number
+            or None
+        ),
+        currency=currency,
+        recipient_type="basa",
+    )
+
+    if not result.get("success"):
+        response = {
+            "success": False,
+            "message": result.get(
+                "message",
+                (
+                    "Unable to save payout "
+                    "account."
+                ),
+            ),
+        }
+
+        if result.get("validation"):
+            response["validation"] = (
+                result["validation"]
+            )
+
+        return response, result.get(
+            "status_code",
+            400,
+        )
+
+    return {
+        "success": True,
+        "message": result.get(
+            "message",
+            (
+                "Payout account saved "
+                "successfully."
+            ),
+        ),
+        "payout_account": result.get(
+            "payout_account_data",
+        ),
+        "validation": result.get(
+            "validation",
+        ),
+    }, (
+        201
+        if result.get("created")
+        else 200
+    )
 
 
 # ==========================
@@ -462,23 +899,9 @@ def create_wallet_withdrawal():
         "amount",
     )
 
-    recipient_code = (
-        str(
-            data.get(
-                "recipient_code",
-                "",
-            )
-        )
-        .strip()
-    )
-
-    if not recipient_code:
-        recipient_code = None
-
     result = create_withdrawal_request(
         artisan_id=artisan.id,
         amount=amount,
-        recipient_code=recipient_code,
     )
 
     if not result.get("success"):

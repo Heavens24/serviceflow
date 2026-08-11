@@ -22,12 +22,13 @@ import Notifications from "./pages/Notifications";
 import PaymentSuccess from "./pages/PaymentSuccess";
 import Register from "./pages/Register";
 import Services from "./pages/Services";
+import Wallet from "./pages/Wallet";
 
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminJobs from "./pages/admin/AdminJobs";
 import AdminReviews from "./pages/admin/AdminReviews";
 import AdminUsers from "./pages/admin/AdminUsers";
-
+import AdminWithdrawals from "./pages/admin/AdminWithdrawals";
 
 function App() {
   return (
@@ -127,6 +128,18 @@ function App() {
         element={
           <ProtectedRoute>
             <Conversation />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* ==========================
+          Artisan Wallet Route
+      ========================== */}
+      <Route
+        path="/wallet"
+        element={
+          <ProtectedRoute>
+            <Wallet />
           </ProtectedRoute>
         }
       />
@@ -233,6 +246,15 @@ function App() {
         }
       />
 
+      <Route
+        path="/admin/withdrawals"
+        element={
+          <AdminRoute>
+            <AdminWithdrawals />
+          </AdminRoute>
+        }
+      />
+
       {/* ==========================
           Fallback Route
       ========================== */}
@@ -243,6 +265,5 @@ function App() {
     </Routes>
   );
 }
-
 
 export default App;

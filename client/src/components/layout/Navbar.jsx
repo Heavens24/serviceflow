@@ -117,17 +117,31 @@ function Navbar() {
             ))}
 
             {user?.role === "artisan" && (
-              <NavLink
-                to="/marketplace"
-                style={({ isActive }) => ({
-                  ...styles.navLink,
-                  ...(isActive
-                    ? styles.activeNavLink
-                    : {}),
-                })}
-              >
-                Marketplace
-              </NavLink>
+              <>
+                <NavLink
+                  to="/marketplace"
+                  style={({ isActive }) => ({
+                    ...styles.navLink,
+                    ...(isActive
+                      ? styles.activeNavLink
+                      : {}),
+                  })}
+                >
+                  Marketplace
+                </NavLink>
+
+                <NavLink
+                  to="/wallet"
+                  style={({ isActive }) => ({
+                    ...styles.navLink,
+                    ...(isActive
+                      ? styles.activeNavLink
+                      : {}),
+                  })}
+                >
+                  Wallet
+                </NavLink>
+              </>
             )}
 
             {user?.role === "customer" && (
@@ -395,6 +409,18 @@ function Navbar() {
                       })}
                     >
                       My jobs
+                    </NavLink>
+
+                    <NavLink
+                      to="/wallet"
+                      style={({ isActive }) => ({
+                        ...styles.mobileLink,
+                        ...(isActive
+                          ? styles.activeMobileLink
+                          : {}),
+                      })}
+                    >
+                      Wallet & payouts
                     </NavLink>
 
                     <NavLink

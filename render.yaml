@@ -1,0 +1,101 @@
+﻿services:
+  - type: web
+    name: serviceflow
+    runtime: python
+    plan: free
+
+    rootDir: server
+
+    buildCommand: >
+      pip install --upgrade pip &&
+      pip install -r requirements.txt
+
+    startCommand: >
+      flask --app app db upgrade &&
+      gunicorn app:app
+      --bind 0.0.0.0:$PORT
+      --workers 1
+      --threads 4
+      --timeout 120
+      --access-logfile -
+      --error-logfile -
+
+    healthCheckPath: /health
+
+    autoDeploy: true
+
+    envVars:
+      - key: APP_ENV
+        value: production
+
+      - key: FLASK_ENV
+        value: production
+
+      - key: FLASK_DEBUG
+        value: "false"
+
+      - key: TESTING
+        value: "false"
+
+      - key: SECRET_KEY
+        sync: false
+
+      - key: JWT_SECRET_KEY
+        sync: false
+
+      - key: JWT_ACCESS_TOKEN_HOURS
+        value: "24"
+
+      - key: MAX_CONTENT_LENGTH_MB
+        value: "10"
+
+      - key: DATABASE_URL
+        sync: false
+
+      - key: FRONTEND_URL
+        value: https://serviceflow-gilt.vercel.app
+
+      - key: CORS_ORIGINS
+        value: https://serviceflow-gilt.vercel.app
+
+      - key: TRUST_PROXY
+        value: "true"
+
+      - key: ENABLE_SECURITY_HEADERS
+        value: "true"
+
+      - key: ENABLE_HSTS
+        value: "true"
+
+      - key: HSTS_MAX_AGE
+        value: "31536000"
+
+      - key: SERVICEFLOW_COMMISSION_PERCENT
+        value: "10"
+
+      - key: FINANCE_CURRENCY
+        value: ZAR
+
+      - key: MINIMUM_WITHDRAWAL_AMOUNT
+        value: "50.00"
+
+      - key: PAYSTACK_ENABLED
+        value: "false"
+
+      - key: PAYSTACK_PUBLIC_KEY
+        sync: false
+
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+
+      - key: PAYSTACK_BASE_URL
+        value: https://api.paystack.co
+
+      - key: PAYSTACK_CALLBACK_URL
+        value: https://serviceflow-gilt.vercel.app/payment/success
+
+      - key: PAYSTACK_WEBHOOK_SECRET
+        sync: false
+
+      - key: PAYSTACK_ALLOW_TEST_MODE_IN_PRODUCTION
+        value: "false"

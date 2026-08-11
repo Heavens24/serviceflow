@@ -135,6 +135,12 @@ function AdminDashboard() {
             description="Inspect customer feedback, ratings, linked jobs, and remove inappropriate reviews."
             to="/admin/reviews"
           />
+
+          <AdminNavigationCard
+            title="Withdrawal Management"
+            description="Review artisan payout requests, approve or reject withdrawals, initiate Paystack transfers, and verify payout status."
+            to="/admin/withdrawals"
+          />
         </div>
       </section>
 

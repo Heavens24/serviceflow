@@ -1,6 +1,5 @@
 import api from "./api";
 
-
 function buildQuery(params = {}) {
   const query = new URLSearchParams();
 
@@ -25,7 +24,6 @@ function buildQuery(params = {}) {
   return query.toString();
 }
 
-
 const adminService = {
   // ==========================
   // Admin Dashboard
@@ -37,7 +35,6 @@ const adminService = {
 
     return data;
   },
-
 
   // ==========================
   // Admin Users
@@ -57,7 +54,6 @@ const adminService = {
     return data;
   },
 
-
   // ==========================
   // Update User Status
   // ==========================
@@ -74,7 +70,6 @@ const adminService = {
 
     return data;
   },
-
 
   // ==========================
   // Update User Verification
@@ -109,7 +104,6 @@ const adminService = {
     return data;
   },
 
-
   // ==========================
   // Update User Role
   // ==========================
@@ -126,7 +120,6 @@ const adminService = {
 
     return data;
   },
-
 
   // ==========================
   // Admin Jobs
@@ -146,7 +139,6 @@ const adminService = {
     return data;
   },
 
-
   // ==========================
   // Get One Admin Job
   // ==========================
@@ -157,7 +149,6 @@ const adminService = {
 
     return data;
   },
-
 
   // ==========================
   // Update Job Status
@@ -176,7 +167,6 @@ const adminService = {
     return data;
   },
 
-
   // ==========================
   // Delete Job
   // ==========================
@@ -187,7 +177,6 @@ const adminService = {
 
     return data;
   },
-
 
   // ==========================
   // Admin Reviews
@@ -207,7 +196,6 @@ const adminService = {
     return data;
   },
 
-
   // ==========================
   // Get One Admin Review
   // ==========================
@@ -219,7 +207,6 @@ const adminService = {
     return data;
   },
 
-
   // ==========================
   // Delete Admin Review
   // ==========================
@@ -230,7 +217,121 @@ const adminService = {
 
     return data;
   },
-};
 
+  // ==========================
+  // Admin Withdrawals
+  // ==========================
+  async getWithdrawals(params = {}) {
+    const queryString =
+      buildQuery(params);
+
+    const endpoint = queryString
+      ? `/api/admin/withdrawals?${queryString}`
+      : "/api/admin/withdrawals";
+
+    const { data } = await api.get(
+      endpoint,
+    );
+
+    return data;
+  },
+
+  // ==========================
+  // Get One Admin Withdrawal
+  // ==========================
+  async getWithdrawal(withdrawalId) {
+    const { data } = await api.get(
+      `/api/admin/withdrawals/${withdrawalId}`,
+    );
+
+    return data;
+  },
+
+  // ==========================
+  // Get Withdrawal Audit Trail
+  // ==========================
+  async getWithdrawalAudit(
+    withdrawalId,
+  ) {
+    const { data } = await api.get(
+      `/api/admin/withdrawals/${withdrawalId}/audit`,
+    );
+
+    return data;
+  },
+
+  // ==========================
+  // Approve Withdrawal
+  // ==========================
+  async approveWithdrawal(
+    withdrawalId,
+  ) {
+    const { data } = await api.post(
+      `/api/admin/withdrawals/${withdrawalId}/approve`,
+    );
+
+    return data;
+  },
+
+  // ==========================
+  // Reject Withdrawal
+  // ==========================
+  async rejectWithdrawal(
+    withdrawalId,
+    reason = "",
+  ) {
+    const { data } = await api.post(
+      `/api/admin/withdrawals/${withdrawalId}/reject`,
+      {
+        reason,
+      },
+    );
+
+    return data;
+  },
+
+  // ==========================
+  // Initiate Paystack Payout
+  // ==========================
+  async payWithdrawal(
+    withdrawalId,
+  ) {
+    const { data } = await api.post(
+      `/api/admin/withdrawals/${withdrawalId}/pay`,
+    );
+
+    return data;
+  },
+
+  // ==========================
+  // Finalize Transfer OTP
+  // ==========================
+  async finalizeWithdrawal(
+    withdrawalId,
+    otp,
+  ) {
+    const { data } = await api.post(
+      `/api/admin/withdrawals/${withdrawalId}/finalize`,
+      {
+        otp,
+      },
+    );
+
+    return data;
+  },
+
+  // ==========================
+  // Verify Transfer
+  // ==========================
+  async verifyWithdrawal(
+    withdrawalId,
+  ) {
+    const { data } = await api.post(
+      `/api/admin/withdrawals/${withdrawalId}/verify`,
+    );
+
+    return data;
+  },
+};
 
 export default adminService;

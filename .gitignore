@@ -16,7 +16,7 @@ __pycache__/
 .mypy_cache/
 
 # =====================================
-# Environment Variables
+# Environment Variables / Secrets
 # =====================================
 
 .env
@@ -28,6 +28,13 @@ __pycache__/
 !.env.example
 !server/.env.example
 
+# Never commit certificates or keys
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
 # =====================================
 # Flask
 # =====================================
@@ -35,8 +42,12 @@ __pycache__/
 instance/
 server/instance/
 
-# SQLite Databases
+# =====================================
+# Local Databases
+# =====================================
+
 *.db
+*.sqlite
 *.sqlite3
 
 # =====================================
@@ -46,8 +57,6 @@ server/instance/
 node_modules/
 dist/
 build/
-
-# Vite cache
 .vite/
 
 # =====================================
@@ -55,33 +64,39 @@ build/
 # =====================================
 
 *.log
+*.log.*
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
 # =====================================
-# VS Code
+# Coverage
+# =====================================
+
+.coverage
+coverage.xml
+htmlcov/
+
+# =====================================
+# Editors
 # =====================================
 
 .vscode/
+.idea/
 
 # =====================================
-# Operating System Files
+# Operating System
 # =====================================
 
 .DS_Store
 Thumbs.db
 
 # =====================================
-# Coverage Reports
-# =====================================
-
-.coverage
-htmlcov/
-
-# =====================================
-# Miscellaneous
+# Temporary / Backup Files
 # =====================================
 
 *.swp
 *.swo
+*.tmp
+*.bak
+*.orig

@@ -5,8 +5,14 @@ from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from flask_migrate import Migrate
 from sqlalchemy import text
+from werkzeug.middleware.proxy_fix import (
+    ProxyFix,
+)
 
-from config import Config
+from config import (
+    Config,
+    validate_production_config,
+)
 from database import db
 from models import (
     ArtisanProfile,
@@ -19,6 +25,7 @@ from models import (
     User,
     Wallet,
     Withdrawal,
+    WithdrawalAudit,
 )
 
 # ==========================
@@ -35,7 +42,9 @@ from routes.customer_profile import (
 )
 from routes.dashboard import dashboard_bp
 from routes.message import message_bp
-from routes.notification import notification_bp
+from routes.notification import (
+    notification_bp,
+)
 from routes.payment import payment_bp
 from routes.review import review_bp
 from routes.service_request import (
@@ -50,6 +59,27 @@ from routes.wallet import wallet_bp
 
 app = Flask(__name__)
 app.config.from_object(Config)
+
+validate_production_config(
+    Config,
+)
+
+
+# ==========================
+# Reverse Proxy Support
+# ==========================
+
+if app.config.get(
+    "TRUST_PROXY",
+    False,
+):
+    app.wsgi_app = ProxyFix(
+        app.wsgi_app,
+        x_for=1,
+        x_proto=1,
+        x_host=1,
+        x_port=1,
+    )
 
 
 # ==========================
@@ -77,7 +107,6 @@ CORS(
             ],
             "expose_headers": [
                 "Content-Type",
-                "Authorization",
             ],
             "supports_credentials": False,
             "max_age": 86400,
@@ -101,6 +130,69 @@ migrate = Migrate(
 
 
 # ==========================
+# Security Headers
+# ==========================
+
+@app.after_request
+def apply_security_headers(
+    response,
+):
+    if not app.config.get(
+        "ENABLE_SECURITY_HEADERS",
+        True,
+    ):
+        return response
+
+    response.headers[
+        "X-Content-Type-Options"
+    ] = "nosniff"
+
+    response.headers[
+        "X-Frame-Options"
+    ] = "DENY"
+
+    response.headers[
+        "Referrer-Policy"
+    ] = "no-referrer"
+
+    response.headers[
+        "Permissions-Policy"
+    ] = (
+        "camera=(), "
+        "microphone=(), "
+        "geolocation=()"
+    )
+
+    response.headers[
+        "Content-Security-Policy"
+    ] = (
+        "default-src 'none'; "
+        "frame-ancestors 'none'; "
+        "base-uri 'none';"
+    )
+
+    response.headers[
+        "Cache-Control"
+    ] = (
+        "no-store"
+    )
+
+    if app.config.get(
+        "ENABLE_HSTS",
+        False,
+    ):
+        response.headers[
+            "Strict-Transport-Security"
+        ] = (
+            "max-age="
+            f"{app.config.get('HSTS_MAX_AGE', 31536000)}"
+            "; includeSubDomains"
+        )
+
+    return response
+
+
+# ==========================
 # JWT Error Responses
 # ==========================
 
@@ -113,7 +205,6 @@ def missing_token_callback(
         "message": (
             "Authentication token is required."
         ),
-        "error": error_message,
     }, 401
 
 
@@ -126,7 +217,6 @@ def invalid_token_callback(
         "message": (
             "The authentication token is invalid."
         ),
-        "error": error_message,
     }, 422
 
 
@@ -250,7 +340,7 @@ def home():
         ),
         "status": "running",
         "environment": app.config.get(
-            "FLASK_ENV",
+            "APP_ENV",
             "unknown",
         ),
     }, 200
@@ -300,7 +390,7 @@ def not_found(error):
 
 
 # ==========================
-# Method Not Allowed Handler
+# Method Not Allowed
 # ==========================
 
 @app.errorhandler(405)
@@ -315,7 +405,7 @@ def method_not_allowed(error):
 
 
 # ==========================
-# Request Too Large Handler
+# Request Too Large
 # ==========================
 
 @app.errorhandler(413)

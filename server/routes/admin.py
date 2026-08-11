@@ -13,7 +13,31 @@ from sqlalchemy import (
 from database import db
 from models.review import Review
 from models.service_request import ServiceRequest
+from models.transaction import Transaction
 from models.user import User
+from models.withdrawal import Withdrawal
+from models.withdrawal_audit import WithdrawalAudit
+from services.payment_service import (
+    finalize_withdrawal_transfer,
+    initiate_withdrawal_transfer,
+    inspect_withdrawal_transfer_for_cancellation,
+    verify_withdrawal_transfer,
+)
+from services.wallet_service import (
+    approve_withdrawal,
+    ensure_withdrawal_transfer_reference,
+    get_withdrawal_transfer_reference,
+    mark_withdrawal_failed,
+    mark_withdrawal_paid,
+    record_withdrawal_transfer,
+    reject_withdrawal,
+    transaction_to_dict,
+    withdrawal_to_dict,
+)
+from services.withdrawal_event_service import (
+    get_withdrawal_audit_events,
+    record_withdrawal_event,
+)
 from utils.admin_required import admin_required
 
 
@@ -2330,4 +2354,1440 @@ def delete_admin_review(review_id):
         "success": True,
         "message": "Review deleted successfully.",
         "review": deleted_review,
+    }, 200
+
+
+# ==========================
+# Admin Withdrawal Helpers
+# ==========================
+def serialize_admin_withdrawal(
+    withdrawal,
+):
+    if not withdrawal:
+        return None
+
+    artisan = db.session.get(
+        User,
+        withdrawal.artisan_id,
+    )
+
+    transaction = (
+        Transaction.query.filter_by(
+            withdrawal_id=withdrawal.id,
+            transaction_type="withdrawal",
+        )
+        .order_by(
+            Transaction.created_at.desc(),
+            Transaction.id.desc(),
+        )
+        .first()
+    )
+
+    return {
+        "withdrawal": (
+            withdrawal_to_dict(
+                withdrawal,
+            )
+        ),
+        "artisan": (
+            {
+                "id": artisan.id,
+                "full_name": artisan.full_name,
+                "email": artisan.email,
+                "phone": artisan.phone,
+                "status": artisan.status,
+                "verified": artisan.verified,
+            }
+            if artisan
+            else None
+        ),
+        "transaction": (
+            transaction_to_dict(
+                transaction,
+            )
+            if transaction
+            else None
+        ),
+    }
+
+
+# ==========================
+# List Admin Withdrawals
+# ==========================
+@admin_bp.route(
+    "/withdrawals",
+    methods=["GET"],
+)
+@admin_required
+def get_admin_withdrawals():
+    status = (
+        request.args.get(
+            "status",
+            "",
+        )
+        .strip()
+        .lower()
+    )
+
+    page, page_error = (
+        parse_optional_integer(
+            request.args.get(
+                "page",
+                1,
+            ),
+            "Page",
+        )
+    )
+
+    if page_error:
+        return page_error, 400
+
+    per_page, per_page_error = (
+        parse_optional_integer(
+            request.args.get(
+                "per_page",
+                DEFAULT_PAGE_SIZE,
+            ),
+            "Per-page",
+        )
+    )
+
+    if per_page_error:
+        return per_page_error, 400
+
+    if per_page > MAX_PAGE_SIZE:
+        return {
+            "success": False,
+            "message": (
+                "Per-page must be between "
+                f"1 and {MAX_PAGE_SIZE}."
+            ),
+        }, 400
+
+    valid_statuses = {
+        "pending",
+        "approved",
+        "processing",
+        "paid",
+        "failed",
+        "rejected",
+    }
+
+    if (
+        status
+        and status != "all"
+        and status not in valid_statuses
+    ):
+        return {
+            "success": False,
+            "message": (
+                "Invalid withdrawal status."
+            ),
+        }, 400
+
+    query = Withdrawal.query
+
+    if status and status != "all":
+        query = query.filter(
+            Withdrawal.status == status,
+        )
+
+    query = query.order_by(
+        Withdrawal.requested_at.desc(),
+        Withdrawal.id.desc(),
+    )
+
+    pagination = query.paginate(
+        page=page,
+        per_page=per_page,
+        error_out=False,
+    )
+
+    return {
+        "success": True,
+        "message": (
+            "Withdrawals loaded successfully."
+        ),
+        "withdrawals": [
+            serialize_admin_withdrawal(
+                withdrawal,
+            )
+            for withdrawal
+            in pagination.items
+        ],
+        "filters": {
+            "status": status or "all",
+        },
+        "pagination": {
+            "page": pagination.page,
+            "per_page": pagination.per_page,
+            "total": pagination.total,
+            "pages": pagination.pages,
+            "has_next": pagination.has_next,
+            "has_previous": (
+                pagination.has_prev
+            ),
+            "next_page": (
+                pagination.next_num
+                if pagination.has_next
+                else None
+            ),
+            "previous_page": (
+                pagination.prev_num
+                if pagination.has_prev
+                else None
+            ),
+        },
+    }, 200
+
+
+# ==========================
+# Get One Admin Withdrawal
+# ==========================
+@admin_bp.route(
+    "/withdrawals/<int:withdrawal_id>",
+    methods=["GET"],
+)
+@admin_required
+def get_admin_withdrawal(
+    withdrawal_id,
+):
+    withdrawal = db.session.get(
+        Withdrawal,
+        withdrawal_id,
+    )
+
+    if not withdrawal:
+        return {
+            "success": False,
+            "message": (
+                "Withdrawal not found."
+            ),
+        }, 404
+
+    return {
+        "success": True,
+        "message": (
+            "Withdrawal loaded successfully."
+        ),
+        **serialize_admin_withdrawal(
+            withdrawal,
+        ),
+    }, 200
+
+
+# ==========================
+# Withdrawal Audit Trail
+# ==========================
+@admin_bp.route(
+    "/withdrawals/<int:withdrawal_id>/audit",
+    methods=["GET"],
+)
+@admin_required
+def get_admin_withdrawal_audit(
+    withdrawal_id,
+):
+    withdrawal = db.session.get(
+        Withdrawal,
+        withdrawal_id,
+    )
+
+    if not withdrawal:
+        return {
+            "success": False,
+            "message": "Withdrawal not found.",
+        }, 404
+
+    return {
+        "success": True,
+        "message": (
+            "Withdrawal audit trail loaded "
+            "successfully."
+        ),
+        "withdrawal": withdrawal_to_dict(
+            withdrawal,
+        ),
+        "audit_events": (
+            get_withdrawal_audit_events(
+                withdrawal.id,
+            )
+        ),
+    }, 200
+
+
+# ==========================
+# Approve Admin Withdrawal
+# ==========================
+@admin_bp.route(
+    "/withdrawals/<int:withdrawal_id>/approve",
+    methods=["POST"],
+)
+@admin_required
+def approve_admin_withdrawal(
+    withdrawal_id,
+):
+    result = approve_withdrawal(
+        withdrawal_id=withdrawal_id,
+        admin_id=g.current_user.id,
+    )
+
+    if not result.get("success"):
+        return {
+            "success": False,
+            "message": result.get(
+                "message",
+                "Unable to approve withdrawal.",
+            ),
+        }, result.get(
+            "status_code",
+            400,
+        )
+
+    return {
+        "success": True,
+        "message": result.get(
+            "message",
+            "Withdrawal approved successfully.",
+        ),
+        "withdrawal": result.get(
+            "withdrawal_data",
+        ),
+    }, 200
+
+
+# ==========================
+# Reject / Cancel Admin Withdrawal
+# ==========================
+@admin_bp.route(
+    "/withdrawals/<int:withdrawal_id>/reject",
+    methods=["POST"],
+)
+@admin_required
+def reject_admin_withdrawal(
+    withdrawal_id,
+):
+    data = request.get_json(
+        silent=True,
+    ) or {}
+
+    reason = str(
+        data.get(
+            "reason",
+            "",
+        )
+        or ""
+    ).strip()
+
+    withdrawal = db.session.get(
+        Withdrawal,
+        withdrawal_id,
+    )
+
+    if not withdrawal:
+        return {
+            "success": False,
+            "message": (
+                "Withdrawal not found."
+            ),
+        }, 404
+
+    # --------------------------------------
+    # Pending: refund immediately
+    # --------------------------------------
+    if withdrawal.status == "pending":
+        result = reject_withdrawal(
+            withdrawal_id=withdrawal.id,
+            admin_id=g.current_user.id,
+            reason=reason or None,
+        )
+
+    # --------------------------------------
+    # Rejected: idempotent response
+    # --------------------------------------
+    elif withdrawal.status == "rejected":
+        result = reject_withdrawal(
+            withdrawal_id=withdrawal.id,
+            admin_id=g.current_user.id,
+            reason=reason or None,
+        )
+
+    # --------------------------------------
+    # Approved: provider-aware cancellation
+    # --------------------------------------
+    elif withdrawal.status == "approved":
+        if withdrawal.transfer_code:
+            return {
+                "success": False,
+                "code": (
+                    "PAYOUT_TRANSFER_ALREADY_EXISTS"
+                ),
+                "message": (
+                    "This withdrawal already has "
+                    "a Paystack transfer code. "
+                    "Verify the transfer before "
+                    "taking any refund action."
+                ),
+                "withdrawal": (
+                    withdrawal_to_dict(
+                        withdrawal,
+                    )
+                ),
+                "funds_reserved": True,
+                "next_action": (
+                    "verify_existing_transfer"
+                ),
+            }, 409
+
+        transaction = (
+            Transaction.query.filter_by(
+                withdrawal_id=withdrawal.id,
+                transaction_type="withdrawal",
+            )
+            .order_by(
+                Transaction.created_at.desc(),
+                Transaction.id.desc(),
+            )
+            .first()
+        )
+
+        provider_reference = str(
+            (
+                transaction.provider_reference
+                if transaction
+                else ""
+            )
+            or ""
+        ).strip().lower()
+
+        # No reference means ServiceFlow has never
+        # prepared an external transfer for this
+        # withdrawal, so cancellation is safe.
+        if not provider_reference:
+            provider_check = {
+                "success": True,
+                "transfer_exists": False,
+                "safe_to_cancel": True,
+                "reference": None,
+                "provider_status": None,
+                "message": (
+                    "No provider transfer "
+                    "reference exists."
+                ),
+            }
+        else:
+            provider_check = (
+                inspect_withdrawal_transfer_for_cancellation(
+                    provider_reference,
+                )
+            )
+
+        if not provider_check.get(
+            "success"
+        ):
+            return {
+                "success": False,
+                "code": provider_check.get(
+                    "error_code",
+                    (
+                        "PAYOUT_CANCELLATION_CHECK_FAILED"
+                    ),
+                ),
+                "message": provider_check.get(
+                    "message",
+                    (
+                        "ServiceFlow could not "
+                        "safely confirm whether "
+                        "a Paystack transfer "
+                        "exists."
+                    ),
+                ),
+                "provider_message": (
+                    provider_check.get(
+                        "provider_message"
+                    )
+                ),
+                "withdrawal_status": (
+                    withdrawal.status
+                ),
+                "funds_reserved": True,
+                "safe_to_cancel": False,
+                "reference": (
+                    provider_reference
+                    or None
+                ),
+                "next_action": (
+                    "retry_provider_check"
+                ),
+            }, provider_check.get(
+                "status_code",
+                503,
+            )
+
+        if provider_check.get(
+            "transfer_exists"
+        ):
+            # If Paystack knows about the transfer,
+            # never credit the artisan wallet from
+            # this cancellation route.
+            provider_transfer_code = (
+                provider_check.get(
+                    "transfer_code"
+                )
+            )
+
+            if (
+                provider_transfer_code
+                and not withdrawal.transfer_code
+            ):
+                withdrawal.transfer_code = (
+                    provider_transfer_code
+                )
+
+            if transaction:
+                transaction.provider_reference = (
+                    provider_check.get(
+                        "reference"
+                    )
+                    or provider_reference
+                )
+
+            try:
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+
+            return {
+                "success": False,
+                "code": (
+                    "PAYOUT_TRANSFER_ALREADY_EXISTS"
+                ),
+                "message": (
+                    "Paystack has a transfer for "
+                    "this withdrawal. ServiceFlow "
+                    "did not return the reserved "
+                    "funds. Verify the transfer "
+                    "instead."
+                ),
+                "provider_status": (
+                    provider_check.get(
+                        "provider_status"
+                    )
+                ),
+                "transfer_code": (
+                    provider_check.get(
+                        "transfer_code"
+                    )
+                ),
+                "reference": (
+                    provider_check.get(
+                        "reference"
+                    )
+                    or provider_reference
+                ),
+                "withdrawal_status": (
+                    withdrawal.status
+                ),
+                "funds_reserved": True,
+                "safe_to_cancel": False,
+                "next_action": (
+                    "verify_existing_transfer"
+                ),
+            }, 409
+
+        if not provider_check.get(
+            "safe_to_cancel"
+        ):
+            return {
+                "success": False,
+                "code": (
+                    "PAYOUT_CANCELLATION_NOT_SAFE"
+                ),
+                "message": (
+                    "The withdrawal could not be "
+                    "safely cancelled."
+                ),
+                "withdrawal_status": (
+                    withdrawal.status
+                ),
+                "funds_reserved": True,
+                "safe_to_cancel": False,
+            }, 409
+
+        # Re-read the withdrawal after the provider
+        # check. Never refund if its state changed
+        # while the external verification was in
+        # progress.
+        db.session.expire(
+            withdrawal,
+        )
+
+        current_withdrawal = (
+            db.session.get(
+                Withdrawal,
+                withdrawal.id,
+            )
+        )
+
+        if (
+            not current_withdrawal
+            or current_withdrawal.status
+            != "approved"
+            or current_withdrawal.transfer_code
+        ):
+            return {
+                "success": False,
+                "code": (
+                    "PAYOUT_STATE_CHANGED"
+                ),
+                "message": (
+                    "The withdrawal changed while "
+                    "ServiceFlow was checking "
+                    "Paystack. No funds were "
+                    "returned."
+                ),
+                "funds_reserved": True,
+                "safe_to_cancel": False,
+                "next_action": (
+                    "refresh_withdrawal"
+                ),
+            }, 409
+
+        result = reject_withdrawal(
+            withdrawal_id=(
+                current_withdrawal.id
+            ),
+            admin_id=g.current_user.id,
+            reason=(
+                reason
+                or (
+                    "Approved withdrawal "
+                    "cancelled after Paystack "
+                    "confirmed that no transfer "
+                    "exists."
+                )
+            ),
+            provider_transfer_absent=True,
+        )
+
+        if result.get("success"):
+            result[
+                "provider_check"
+            ] = {
+                "transfer_exists": False,
+                "safe_to_cancel": True,
+                "provider_status": (
+                    provider_check.get(
+                        "provider_status"
+                    )
+                ),
+                "reference": (
+                    provider_reference
+                    or None
+                ),
+            }
+
+    else:
+        return {
+            "success": False,
+            "message": (
+                "This withdrawal cannot be "
+                "rejected or cancelled from its "
+                f"current {withdrawal.status} "
+                "state."
+            ),
+            "withdrawal_status": (
+                withdrawal.status
+            ),
+            "funds_reserved": (
+                withdrawal.status
+                not in {
+                    "failed",
+                    "paid",
+                    "rejected",
+                }
+            ),
+        }, 409
+
+    if not result.get("success"):
+        return {
+            "success": False,
+            "message": result.get(
+                "message",
+                (
+                    "Unable to reject or cancel "
+                    "withdrawal."
+                ),
+            ),
+        }, result.get(
+            "status_code",
+            400,
+        )
+
+    return {
+        "success": True,
+        "message": result.get(
+            "message",
+            (
+                "Withdrawal rejected "
+                "successfully."
+            ),
+        ),
+        "already_rejected": bool(
+            result.get(
+                "already_rejected",
+                False,
+            )
+        ),
+        "previous_status": result.get(
+            "previous_status"
+        ),
+        "withdrawal": result.get(
+            "withdrawal_data",
+        ),
+        "transaction": result.get(
+            "transaction_data",
+        ),
+        "wallet": result.get(
+            "wallet_data",
+        ),
+        "provider_check": result.get(
+            "provider_check"
+        ),
+    }, 200
+
+
+# ==========================
+# Pay Approved Withdrawal
+# ==========================
+@admin_bp.route(
+    "/withdrawals/<int:withdrawal_id>/pay",
+    methods=["POST"],
+)
+@admin_required
+def pay_admin_withdrawal(
+    withdrawal_id,
+):
+    withdrawal = db.session.get(
+        Withdrawal,
+        withdrawal_id,
+    )
+
+    if not withdrawal:
+        return {
+            "success": False,
+            "message": (
+                "Withdrawal not found."
+            ),
+        }, 404
+
+    # --------------------------------------
+    # Idempotent already-completed states
+    # --------------------------------------
+    if withdrawal.status == "paid":
+        return {
+            "success": True,
+            "message": (
+                "This withdrawal has already "
+                "been paid."
+            ),
+            "already_initiated": True,
+            "withdrawal": (
+                withdrawal_to_dict(
+                    withdrawal,
+                )
+            ),
+        }, 200
+
+    if withdrawal.status == "processing":
+        return {
+            "success": True,
+            "message": (
+                "This withdrawal is already "
+                "processing. Verify the existing "
+                "Paystack transfer instead of "
+                "initiating another one."
+            ),
+            "already_initiated": True,
+            "next_action": (
+                "verify_existing_transfer"
+            ),
+            "withdrawal": (
+                withdrawal_to_dict(
+                    withdrawal,
+                )
+            ),
+        }, 200
+
+    if withdrawal.status != "approved":
+        return {
+            "success": False,
+            "message": (
+                "Only approved withdrawals "
+                "can be sent to Paystack."
+            ),
+            "withdrawal_status": (
+                withdrawal.status
+            ),
+            "funds_reserved": (
+                withdrawal.status
+                not in {
+                    "rejected",
+                    "failed",
+                    "paid",
+                }
+            ),
+        }, 409
+
+    # If a provider transfer code already exists,
+    # never create a second transfer.
+    if withdrawal.transfer_code:
+        return {
+            "success": True,
+            "message": (
+                "This withdrawal already has a "
+                "Paystack transfer. Verify or "
+                "finalize the existing transfer."
+            ),
+            "already_initiated": True,
+            "next_action": (
+                "verify_or_finalize"
+            ),
+            "withdrawal": (
+                withdrawal_to_dict(
+                    withdrawal,
+                )
+            ),
+        }, 200
+
+    # --------------------------------------
+    # Stable idempotency reference
+    # --------------------------------------
+    reference_result = (
+        ensure_withdrawal_transfer_reference(
+            withdrawal.id,
+        )
+    )
+
+    if not reference_result.get(
+        "success"
+    ):
+        return {
+            "success": False,
+            "message": reference_result.get(
+                "message",
+                (
+                    "Unable to prepare payout "
+                    "reference."
+                ),
+            ),
+            "withdrawal_status": (
+                withdrawal.status
+            ),
+            "funds_reserved": True,
+        }, reference_result.get(
+            "status_code",
+            500,
+        )
+
+    provider_reference = (
+        reference_result[
+            "provider_reference"
+        ]
+    )
+
+    # --------------------------------------
+    # Initiate provider transfer
+    # --------------------------------------
+    provider_result = (
+        initiate_withdrawal_transfer(
+            withdrawal,
+            reference=provider_reference,
+        )
+    )
+
+    if not provider_result.get(
+        "success"
+    ):
+        error_code = provider_result.get(
+            "error_code",
+            "PAYOUT_PROVIDER_ERROR",
+        )
+
+        audit_result = record_withdrawal_event(
+            withdrawal,
+            "payout_provider_rejected",
+            actor_user_id=g.current_user.id,
+            actor_role="admin",
+            previous_status=withdrawal.status,
+            new_status=withdrawal.status,
+            provider="paystack",
+            provider_reference=provider_reference,
+            reason=provider_result.get(
+                "message"
+            ),
+            event_metadata={
+                "error_code": error_code,
+                "retryable": bool(
+                    provider_result.get(
+                        "retryable",
+                        False,
+                    )
+                ),
+                "action_required": (
+                    provider_result.get(
+                        "action_required"
+                    )
+                ),
+            },
+            notification_title=(
+                "Payout could not be sent"
+            ),
+            notification_message=(
+                f"Your {float(withdrawal.amount):.2f} "
+                f"{withdrawal.currency} withdrawal "
+                f"request #{withdrawal.id} could "
+                "not be sent yet. Your funds "
+                "remain safely reserved."
+            ),
+            commit=True,
+        )
+
+        if not audit_result.get("success"):
+            return {
+                "success": False,
+                "message": (
+                    "The payout provider rejected "
+                    "the transfer, and ServiceFlow "
+                    "could not record the audit event."
+                ),
+            }, 500
+
+        return {
+            "success": False,
+            "code": error_code,
+            "message": provider_result.get(
+                "message",
+                "Unable to initiate transfer.",
+            ),
+            "provider_message": (
+                provider_result.get(
+                    "provider_message"
+                )
+            ),
+            "withdrawal_status": (
+                withdrawal.status
+            ),
+            "funds_reserved": True,
+            "retryable": bool(
+                provider_result.get(
+                    "retryable",
+                    False,
+                )
+            ),
+            "action_required": (
+                provider_result.get(
+                    "action_required"
+                )
+            ),
+            "transfer_may_exist": bool(
+                provider_result.get(
+                    "transfer_may_exist",
+                    False,
+                )
+            ),
+            "reference": (
+                provider_reference
+            ),
+        }, provider_result.get(
+            "status_code",
+            502,
+        )
+
+    provider_status = (
+        provider_result.get(
+            "provider_status",
+            "unknown",
+        )
+    )
+
+    requires_otp = bool(
+        provider_result.get(
+            "requires_otp",
+        )
+    )
+
+    record_result = (
+        record_withdrawal_transfer(
+            withdrawal_id=withdrawal.id,
+            transfer_code=provider_result[
+                "transfer_code"
+            ],
+            provider_reference=(
+                provider_result.get(
+                    "reference",
+                )
+                or provider_reference
+            ),
+            mark_processing=(
+                not requires_otp
+            ),
+        actor_user_id=g.current_user.id,
+        )
+    )
+
+    if not record_result.get("success"):
+        return {
+            "success": False,
+            "code": (
+                "PAYOUT_LOCAL_SAVE_FAILED"
+            ),
+            "message": record_result.get(
+                "message",
+                (
+                    "Paystack created the transfer, "
+                    "but ServiceFlow could not save "
+                    "its transfer details."
+                ),
+            ),
+            "withdrawal_status": (
+                withdrawal.status
+            ),
+            "funds_reserved": True,
+            "retryable": False,
+            "action_required": (
+                "verify_existing_transfer"
+            ),
+            "transfer_may_exist": True,
+            "reference": (
+                provider_result.get(
+                    "reference"
+                )
+                or provider_reference
+            ),
+        }, record_result.get(
+            "status_code",
+            500,
+        )
+
+    return {
+        "success": True,
+        "message": (
+            "Paystack requires transfer OTP."
+            if requires_otp
+            else
+            "Withdrawal transfer initiated."
+        ),
+        "already_initiated": False,
+        "requires_otp": requires_otp,
+        "provider_status": provider_status,
+        "transfer_code": (
+            provider_result.get(
+                "transfer_code",
+            )
+        ),
+        "reference": (
+            provider_result.get(
+                "reference",
+            )
+            or provider_reference
+        ),
+        "next_action": (
+            "finalize_otp"
+            if requires_otp
+            else
+            "verify_transfer"
+        ),
+        "withdrawal": record_result.get(
+            "withdrawal_data",
+        ),
+        "transaction": record_result.get(
+            "transaction_data",
+        ),
+    }, 202
+
+
+# ==========================
+# Finalize Withdrawal OTP
+# ==========================
+@admin_bp.route(
+    "/withdrawals/<int:withdrawal_id>/finalize",
+    methods=["POST"],
+)
+@admin_required
+def finalize_admin_withdrawal(
+    withdrawal_id,
+):
+    withdrawal = db.session.get(
+        Withdrawal,
+        withdrawal_id,
+    )
+
+    if not withdrawal:
+        return {
+            "success": False,
+            "message": (
+                "Withdrawal not found."
+            ),
+        }, 404
+
+    if withdrawal.status != "approved":
+        return {
+            "success": False,
+            "message": (
+                "Only an approved withdrawal "
+                "awaiting OTP can be finalized."
+            ),
+        }, 409
+
+    transfer_code = str(
+        withdrawal.transfer_code
+        or ""
+    ).strip()
+
+    if not transfer_code:
+        return {
+            "success": False,
+            "message": (
+                "This withdrawal does not have "
+                "a Paystack transfer code."
+            ),
+        }, 409
+
+    data = request.get_json(
+        silent=True,
+    ) or {}
+
+    otp = str(
+        data.get(
+            "otp",
+            "",
+        )
+        or ""
+    ).strip()
+
+    if not otp:
+        return {
+            "success": False,
+            "message": (
+                "Transfer OTP is required."
+            ),
+        }, 400
+
+    provider_result = (
+        finalize_withdrawal_transfer(
+            transfer_code=transfer_code,
+            otp=otp,
+        )
+    )
+
+    if not provider_result.get(
+        "success"
+    ):
+        return {
+            "success": False,
+            "message": provider_result.get(
+                "message",
+                "Unable to finalize transfer.",
+            ),
+        }, provider_result.get(
+            "status_code",
+            502,
+        )
+
+    record_result = (
+        record_withdrawal_transfer(
+            withdrawal_id=withdrawal.id,
+            transfer_code=(
+                provider_result.get(
+                    "transfer_code",
+                )
+                or transfer_code
+            ),
+            provider_reference=(
+                provider_result.get(
+                    "reference",
+                )
+            ),
+            mark_processing=True,
+            actor_user_id=g.current_user.id,
+        )
+    )
+
+    if not record_result.get("success"):
+        return {
+            "success": False,
+            "message": record_result.get(
+                "message",
+                (
+                    "Transfer was finalized, but "
+                    "ServiceFlow could not update "
+                    "the withdrawal."
+                ),
+            ),
+        }, record_result.get(
+            "status_code",
+            500,
+        )
+
+    return {
+        "success": True,
+        "message": (
+            "Withdrawal transfer finalized "
+            "and is processing."
+        ),
+        "provider_status": (
+            provider_result.get(
+                "provider_status",
+            )
+        ),
+        "withdrawal": record_result.get(
+            "withdrawal_data",
+        ),
+        "transaction": record_result.get(
+            "transaction_data",
+        ),
+    }, 202
+
+
+# ==========================
+# Verify Withdrawal Transfer
+# ==========================
+@admin_bp.route(
+    "/withdrawals/<int:withdrawal_id>/verify",
+    methods=["POST"],
+)
+@admin_required
+def verify_admin_withdrawal(
+    withdrawal_id,
+):
+    reference_result = (
+        get_withdrawal_transfer_reference(
+            withdrawal_id,
+        )
+    )
+
+    if not reference_result.get(
+        "success"
+    ):
+        return {
+            "success": False,
+            "message": reference_result.get(
+                "message",
+                (
+                    "Unable to load transfer "
+                    "reference."
+                ),
+            ),
+        }, reference_result.get(
+            "status_code",
+            400,
+        )
+
+    withdrawal = (
+        reference_result[
+            "withdrawal"
+        ]
+    )
+
+    provider_result = (
+        verify_withdrawal_transfer(
+            reference_result[
+                "provider_reference"
+            ],
+        )
+    )
+
+    if not provider_result.get(
+        "success"
+    ):
+        return {
+            "success": False,
+            "message": provider_result.get(
+                "message",
+                (
+                    "Unable to verify transfer."
+                ),
+            ),
+        }, provider_result.get(
+            "status_code",
+            502,
+        )
+
+    provider_status = str(
+        provider_result.get(
+            "provider_status",
+            "",
+        )
+        or ""
+    ).strip().lower()
+
+    expected_amount = float(
+        withdrawal.amount
+        or 0
+    )
+
+    provider_amount = (
+        provider_result.get(
+            "amount"
+        )
+    )
+
+    provider_currency = str(
+        provider_result.get(
+            "currency",
+            "",
+        )
+        or ""
+    ).strip().upper()
+
+    expected_currency = str(
+        withdrawal.currency
+        or "ZAR"
+    ).strip().upper()
+
+    if (
+        provider_amount is not None
+        and round(
+            float(provider_amount),
+            2,
+        )
+        != round(
+            expected_amount,
+            2,
+        )
+    ):
+        return {
+            "success": False,
+            "message": (
+                "Transfer amount verification "
+                "failed."
+            ),
+        }, 409
+
+    if (
+        provider_currency
+        and provider_currency
+        != expected_currency
+    ):
+        return {
+            "success": False,
+            "message": (
+                "Transfer currency verification "
+                "failed."
+            ),
+        }, 409
+
+    transfer_code = (
+        provider_result.get(
+            "transfer_code"
+        )
+        or withdrawal.transfer_code
+    )
+
+    if provider_status == "success":
+        state_result = (
+            mark_withdrawal_paid(
+                withdrawal_id=withdrawal.id,
+                transfer_code=transfer_code,
+                provider_reference=(
+                    provider_result.get(
+                        "reference"
+                    )
+                ),
+                actor_user_id=g.current_user.id,
+            )
+        )
+
+    elif provider_status in {
+        "failed",
+        "reversed",
+    }:
+        state_result = (
+            mark_withdrawal_failed(
+                withdrawal_id=withdrawal.id,
+                reason=(
+                    "Paystack transfer "
+                    f"{provider_status}."
+                ),
+                actor_user_id=g.current_user.id,
+            )
+        )
+
+    else:
+        if withdrawal.status == "approved":
+            state_result = (
+                record_withdrawal_transfer(
+                    withdrawal_id=withdrawal.id,
+                    transfer_code=transfer_code,
+                    provider_reference=(
+                        provider_result.get(
+                            "reference"
+                        )
+                    ),
+                    mark_processing=True,
+                )
+            )
+        else:
+            state_result = {
+                "success": True,
+                "withdrawal_data": (
+                    withdrawal_to_dict(
+                        withdrawal,
+                    )
+                ),
+                "transaction_data": (
+                    transaction_to_dict(
+                        reference_result[
+                            "transaction"
+                        ],
+                    )
+                    if reference_result.get(
+                        "transaction"
+                    )
+                    else None
+                ),
+            }
+
+    if not state_result.get("success"):
+        return {
+            "success": False,
+            "message": state_result.get(
+                "message",
+                (
+                    "Unable to update withdrawal "
+                    "status."
+                ),
+            ),
+        }, state_result.get(
+            "status_code",
+            500,
+        )
+
+    return {
+        "success": True,
+        "message": (
+            "Withdrawal transfer verified."
+        ),
+        "provider_status": provider_status,
+        "provider": {
+            "reference": (
+                provider_result.get(
+                    "reference"
+                )
+            ),
+            "transfer_code": (
+                transfer_code
+            ),
+            "amount": provider_amount,
+            "currency": provider_currency,
+        },
+        "withdrawal": state_result.get(
+            "withdrawal_data",
+        ),
+        "transaction": state_result.get(
+            "transaction_data",
+        ),
+        "wallet": state_result.get(
+            "wallet_data",
+        ),
     }, 200

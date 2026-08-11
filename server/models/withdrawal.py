@@ -1,5 +1,3 @@
-# server/models/withdrawal.py
-
 from database import db
 
 
