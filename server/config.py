@@ -416,12 +416,18 @@ class Config:
         .strip()
     )
 
+    # Paystack signs webhook payloads with the
+    # integration secret key. PAYSTACK_WEBHOOK_SECRET
+    # remains supported as an optional explicit
+    # override, but normally falls back to
+    # PAYSTACK_SECRET_KEY.
     PAYSTACK_WEBHOOK_SECRET = (
         os.getenv(
             "PAYSTACK_WEBHOOK_SECRET",
             "",
         )
         .strip()
+        or PAYSTACK_SECRET_KEY
     )
 
     PAYSTACK_ALLOW_TEST_MODE_IN_PRODUCTION = (

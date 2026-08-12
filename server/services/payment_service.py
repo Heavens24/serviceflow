@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import json
 from decimal import (
     Decimal,
@@ -13,9 +15,13 @@ from database import db
 from models.service_request import ServiceRequest
 from models.transaction import Transaction
 from models.user import User
+from models.withdrawal import Withdrawal
+from services.withdrawal_event_service import record_withdrawal_event
 from services.wallet_service import (
     calculate_payment_split,
     get_or_create_wallet,
+    mark_withdrawal_failed,
+    mark_withdrawal_paid,
     transaction_to_dict,
     wallet_to_dict,
 )
@@ -160,9 +166,19 @@ def get_paystack_config():
         or "ZAR"
     ).strip().upper()
 
+    webhook_secret = (
+        current_app.config.get(
+            "PAYSTACK_WEBHOOK_SECRET",
+            "",
+        )
+        or secret_key
+        or ""
+    ).strip()
+
     return {
         "enabled": enabled,
         "secret_key": secret_key,
+        "webhook_secret": webhook_secret,
         "base_url": base_url,
         "callback_url": callback_url,
         "currency": currency,
@@ -293,6 +309,1106 @@ def paystack_request(
                 "message"
             )
         ),
+    }
+
+
+# ==========================
+# Paystack Webhook Helpers
+# ==========================
+def verify_paystack_webhook_signature(
+    raw_body,
+    signature,
+):
+    """
+    Verify Paystack's x-paystack-signature header.
+
+    Paystack signs the exact raw request body with
+    HMAC-SHA512 using the integration secret key.
+    """
+
+    signature = str(
+        signature or "",
+    ).strip().lower()
+
+    if not signature:
+        return False
+
+    config = get_paystack_config()
+
+    webhook_secret = (
+        config.get("webhook_secret")
+        or config.get("secret_key")
+        or ""
+    ).strip()
+
+    if not webhook_secret:
+        return False
+
+    if isinstance(raw_body, str):
+        raw_body = raw_body.encode("utf-8")
+
+    if not isinstance(
+        raw_body,
+        (bytes, bytearray),
+    ):
+        return False
+
+    expected_signature = hmac.new(
+        webhook_secret.encode("utf-8"),
+        bytes(raw_body),
+        hashlib.sha512,
+    ).hexdigest()
+
+    return hmac.compare_digest(
+        expected_signature,
+        signature,
+    )
+
+
+def _find_payment_transaction_for_update(
+    reference,
+):
+    reference = str(
+        reference or "",
+    ).strip()
+
+    if not reference:
+        return None
+
+    return (
+        Transaction.query.filter(
+            Transaction.transaction_type
+            == "payment",
+            (
+                Transaction.reference
+                == reference
+            )
+            |
+            (
+                Transaction.provider_reference
+                == reference
+            ),
+        )
+        .with_for_update()
+        .first()
+    )
+
+
+def _validate_provider_payment_data(
+    transaction,
+    provider_data,
+):
+    provider_status = str(
+        provider_data.get(
+            "status",
+            "",
+        )
+        or ""
+    ).strip().lower()
+
+    provider_currency = str(
+        provider_data.get(
+            "currency",
+            "",
+        )
+        or ""
+    ).strip().upper()
+
+    provider_amount = from_subunit(
+        provider_data.get(
+            "amount"
+        )
+    )
+
+    expected_amount = to_money(
+        transaction.amount,
+    )
+
+    expected_currency = (
+        transaction.currency
+        or "ZAR"
+    ).strip().upper()
+
+    if provider_status != "success":
+        return None, {
+            "success": False,
+            "message": (
+                "The payment has not "
+                "completed successfully."
+            ),
+            "payment_status": (
+                provider_status
+                or "unknown"
+            ),
+            "status_code": 409,
+        }
+
+    if (
+        provider_amount is None
+        or provider_amount
+        != expected_amount
+    ):
+        return None, {
+            "success": False,
+            "message": (
+                "Payment amount "
+                "verification failed."
+            ),
+            "status_code": 409,
+        }
+
+    if (
+        provider_currency
+        != expected_currency
+    ):
+        return None, {
+            "success": False,
+            "message": (
+                "Payment currency "
+                "verification failed."
+            ),
+            "status_code": 409,
+        }
+
+    return {
+        "status": provider_status,
+        "currency": provider_currency,
+        "amount": provider_amount,
+    }, None
+
+
+def finalize_verified_payment(
+    reference,
+    provider_data,
+    customer_id=None,
+):
+    """
+    Apply a successful provider payment to
+    ServiceFlow exactly once.
+
+    The transaction row is locked before wallet
+    mutation so a callback verification and a
+    webhook arriving together cannot credit the
+    artisan twice.
+    """
+
+    reference = str(
+        reference or "",
+    ).strip()
+
+    if not reference:
+        return {
+            "success": False,
+            "message": (
+                "Payment reference is required."
+            ),
+            "status_code": 400,
+        }
+
+    transaction = (
+        _find_payment_transaction_for_update(
+            reference,
+        )
+    )
+
+    if not transaction:
+        return {
+            "success": False,
+            "message": (
+                "Payment transaction "
+                "was not found."
+            ),
+            "status_code": 404,
+        }
+
+    if customer_id is not None:
+        try:
+            customer_id = int(
+                customer_id,
+            )
+        except (
+            TypeError,
+            ValueError,
+        ):
+            return {
+                "success": False,
+                "message": (
+                    "Invalid user identity."
+                ),
+                "status_code": 401,
+            }
+
+        if (
+            transaction.customer_id
+            != customer_id
+        ):
+            return {
+                "success": False,
+                "message": (
+                    "You are not authorized "
+                    "to verify this payment."
+                ),
+                "status_code": 403,
+            }
+
+    if (
+        transaction.status
+        == "successful"
+    ):
+        return {
+            "success": True,
+            "message": (
+                "Payment was already "
+                "verified."
+            ),
+            "already_processed": True,
+            "transaction": (
+                transaction_to_dict(
+                    transaction,
+                )
+            ),
+        }
+
+    validated, validation_error = (
+        _validate_provider_payment_data(
+            transaction,
+            provider_data,
+        )
+    )
+
+    if validation_error:
+        return validation_error
+
+    service_request = db.session.get(
+        ServiceRequest,
+        transaction.service_request_id,
+    )
+
+    if not service_request:
+        return {
+            "success": False,
+            "message": (
+                "Linked service request "
+                "was not found."
+            ),
+            "status_code": 404,
+        }
+
+    if (
+        service_request.customer_id
+        != transaction.customer_id
+        or service_request.artisan_id
+        != transaction.artisan_id
+    ):
+        return {
+            "success": False,
+            "message": (
+                "Payment ownership "
+                "verification failed."
+            ),
+            "status_code": 409,
+        }
+
+    wallet_result = (
+        get_or_create_wallet(
+            transaction.artisan_id,
+            commit=False,
+        )
+    )
+
+    if not wallet_result.get(
+        "success"
+    ):
+        return wallet_result
+
+    wallet = (
+        wallet_result["wallet"]
+    )
+
+    pending_balance = (
+        to_money(
+            wallet.pending_balance
+        )
+        or Decimal("0.00")
+    )
+
+    artisan_amount = (
+        to_money(
+            transaction.artisan_amount
+        )
+        or Decimal("0.00")
+    )
+
+    if artisan_amount <= 0:
+        return {
+            "success": False,
+            "message": (
+                "The artisan payment "
+                "amount is invalid."
+            ),
+            "status_code": 500,
+        }
+
+    wallet.pending_balance = float(
+        pending_balance
+        + artisan_amount
+    )
+
+    transaction.status = (
+        "successful"
+    )
+
+    transaction.provider_reference = (
+        str(
+            provider_data.get(
+                "reference"
+            )
+            or reference
+        )
+    )
+
+    transaction.description = (
+        "Paystack payment verified "
+        f"for service request "
+        f"#{service_request.id}."
+    )
+
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+        return {
+            "success": False,
+            "message": (
+                "Payment was verified, "
+                "but ServiceFlow could "
+                "not finalize it."
+            ),
+            "status_code": 500,
+        }
+
+    return {
+        "success": True,
+        "message": (
+            "Payment verified "
+            "successfully."
+        ),
+        "already_processed": False,
+        "transaction": (
+            transaction_to_dict(
+                transaction,
+            )
+        ),
+        "wallet": (
+            wallet_to_dict(
+                wallet,
+            )
+        ),
+        "provider": {
+            "reference": (
+                provider_data.get(
+                    "reference"
+                )
+            ),
+            "status": (
+                validated["status"]
+            ),
+            "amount": float(
+                validated["amount"],
+            ),
+            "currency": (
+                validated["currency"]
+            ),
+            "channel": (
+                provider_data.get(
+                    "channel"
+                )
+            ),
+            "paid_at": (
+                provider_data.get(
+                    "paid_at"
+                )
+            ),
+        },
+    }
+
+
+def _find_withdrawal_from_provider_data(
+    provider_data,
+):
+    provider_reference = str(
+        provider_data.get(
+            "reference",
+            "",
+        )
+        or ""
+    ).strip()
+
+    transfer_code = str(
+        provider_data.get(
+            "transfer_code",
+            "",
+        )
+        or ""
+    ).strip()
+
+    transaction = None
+
+    if provider_reference:
+        transaction = (
+            Transaction.query.filter(
+                Transaction.transaction_type
+                == "withdrawal",
+                Transaction.provider_reference
+                == provider_reference,
+            )
+            .with_for_update()
+            .first()
+        )
+
+    if (
+        transaction is None
+        and transfer_code
+    ):
+        withdrawal = (
+            Withdrawal.query.filter_by(
+                transfer_code=transfer_code,
+            )
+            .with_for_update()
+            .first()
+        )
+
+        if withdrawal:
+            transaction = (
+                Transaction.query.filter_by(
+                    withdrawal_id=withdrawal.id,
+                    transaction_type="withdrawal",
+                )
+                .with_for_update()
+                .first()
+            )
+
+            return (
+                withdrawal,
+                transaction,
+                provider_reference,
+                transfer_code,
+            )
+
+    if (
+        transaction
+        and transaction.withdrawal_id
+    ):
+        withdrawal = (
+            Withdrawal.query.filter_by(
+                id=transaction.withdrawal_id,
+            )
+            .with_for_update()
+            .first()
+        )
+
+        return (
+            withdrawal,
+            transaction,
+            provider_reference,
+            transfer_code,
+        )
+
+    return (
+        None,
+        transaction,
+        provider_reference,
+        transfer_code,
+    )
+
+
+def _validate_provider_transfer_data(
+    withdrawal,
+    provider_data,
+):
+    provider_amount = from_subunit(
+        provider_data.get(
+            "amount"
+        )
+    )
+
+    provider_currency = str(
+        provider_data.get(
+            "currency",
+            "",
+        )
+        or ""
+    ).strip().upper()
+
+    expected_amount = to_money(
+        withdrawal.amount,
+    )
+
+    expected_currency = str(
+        withdrawal.currency
+        or "ZAR"
+    ).strip().upper()
+
+    if (
+        provider_amount is None
+        or provider_amount
+        != expected_amount
+    ):
+        return {
+            "success": False,
+            "message": (
+                "Transfer amount "
+                "verification failed."
+            ),
+            "status_code": 409,
+        }
+
+    if (
+        provider_currency
+        and provider_currency
+        != expected_currency
+    ):
+        return {
+            "success": False,
+            "message": (
+                "Transfer currency "
+                "verification failed."
+            ),
+            "status_code": 409,
+        }
+
+    return None
+
+
+def _restore_reversed_paid_withdrawal(
+    withdrawal,
+    transaction,
+    provider_reference,
+    transfer_code,
+    reason,
+):
+    """
+    Defensive reconciliation for the unusual case
+    where a withdrawal was already marked paid and
+    Paystack later sends transfer.reversed.
+    """
+
+    wallet_result = get_or_create_wallet(
+        withdrawal.artisan_id,
+        commit=False,
+    )
+
+    if not wallet_result.get(
+        "success"
+    ):
+        return wallet_result
+
+    wallet = wallet_result["wallet"]
+
+    available_balance = (
+        to_money(
+            wallet.available_balance
+        )
+        or Decimal("0.00")
+    )
+
+    total_withdrawn = (
+        to_money(
+            wallet.total_withdrawn
+        )
+        or Decimal("0.00")
+    )
+
+    amount = (
+        to_money(
+            withdrawal.amount
+        )
+        or Decimal("0.00")
+    )
+
+    wallet.available_balance = float(
+        available_balance + amount
+    )
+
+    wallet.total_withdrawn = float(
+        max(
+            Decimal("0.00"),
+            total_withdrawn - amount,
+        )
+    )
+
+    previous_status = withdrawal.status
+
+    withdrawal.status = "failed"
+    withdrawal.failure_reason = reason
+
+    if transfer_code:
+        withdrawal.transfer_code = (
+            transfer_code
+        )
+
+    if transaction:
+        transaction.status = "failed"
+
+        if provider_reference:
+            transaction.provider_reference = (
+                provider_reference
+            )
+
+        transaction.description = (
+            "Paystack reversed a previously "
+            "completed artisan withdrawal."
+        )
+
+    event_result = record_withdrawal_event(
+        withdrawal,
+        "payout_reversed",
+        actor_role="provider",
+        previous_status=previous_status,
+        new_status="failed",
+        reason=reason,
+        provider_reference=(
+            provider_reference
+        ),
+        transfer_code=transfer_code,
+        event_metadata={
+            "webhook_event": (
+                "transfer.reversed"
+            ),
+            "funds_returned": True,
+            "wallet_balance_after_refund": (
+                float(
+                    wallet.available_balance
+                )
+            ),
+        },
+        notification_title=(
+            "Withdrawal reversed"
+        ),
+        notification_message=(
+            f"Your {float(amount):.2f} "
+            f"{withdrawal.currency or 'ZAR'} "
+            "withdrawal was reversed by "
+            "the payout provider and the "
+            "funds were returned to your "
+            "ServiceFlow wallet."
+        ),
+        commit=False,
+    )
+
+    if not event_result.get(
+        "success"
+    ):
+        return event_result
+
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+        return {
+            "success": False,
+            "message": (
+                "Unable to reconcile the "
+                "reversed withdrawal."
+            ),
+            "status_code": 500,
+        }
+
+    return {
+        "success": True,
+        "message": (
+            "Reversed withdrawal "
+            "reconciled successfully."
+        ),
+        "already_processed": False,
+    }
+
+
+def reconcile_transfer_webhook(
+    event_name,
+    provider_data,
+):
+    (
+        withdrawal,
+        transaction,
+        provider_reference,
+        transfer_code,
+    ) = _find_withdrawal_from_provider_data(
+        provider_data,
+    )
+
+    if not withdrawal:
+        return {
+            "success": False,
+            "message": (
+                "Withdrawal for Paystack "
+                "transfer webhook was not found."
+            ),
+            "status_code": 404,
+        }
+
+    validation_error = (
+        _validate_provider_transfer_data(
+            withdrawal,
+            provider_data,
+        )
+    )
+
+    if validation_error:
+        return validation_error
+
+    previous_status = (
+        withdrawal.status
+    )
+
+    if event_name == "transfer.success":
+        if previous_status == "paid":
+            return {
+                "success": True,
+                "message": (
+                    "Withdrawal was already "
+                    "marked as paid."
+                ),
+                "already_processed": True,
+            }
+
+        result = mark_withdrawal_paid(
+            withdrawal_id=withdrawal.id,
+            transfer_code=(
+                transfer_code or None
+            ),
+            provider_reference=(
+                provider_reference or None
+            ),
+            commit=False,
+        )
+
+        if not result.get("success"):
+            return result
+
+        event_result = record_withdrawal_event(
+            withdrawal,
+            "payout_succeeded",
+            actor_role="provider",
+            previous_status=previous_status,
+            new_status="paid",
+            provider_reference=(
+                provider_reference
+            ),
+            transfer_code=transfer_code,
+            event_metadata={
+                "webhook_event": event_name,
+            },
+            notification_title=(
+                "Withdrawal paid"
+            ),
+            notification_message=(
+                f"Your {float(withdrawal.amount):.2f} "
+                f"{withdrawal.currency or 'ZAR'} "
+                "withdrawal has been paid "
+                "successfully."
+            ),
+            commit=False,
+        )
+
+        if not event_result.get(
+            "success"
+        ):
+            return event_result
+
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+            return {
+                "success": False,
+                "message": (
+                    "Unable to finalize the "
+                    "successful withdrawal webhook."
+                ),
+                "status_code": 500,
+            }
+
+        return {
+            "success": True,
+            "message": (
+                "Successful withdrawal webhook "
+                "processed."
+            ),
+            "already_processed": False,
+        }
+
+    if event_name in {
+        "transfer.failed",
+        "transfer.reversed",
+    }:
+        if previous_status == "failed":
+            return {
+                "success": True,
+                "message": (
+                    "Withdrawal failure was "
+                    "already processed."
+                ),
+                "already_processed": True,
+            }
+
+        reason = (
+            str(
+                provider_data.get(
+                    "reason",
+                    "",
+                )
+                or provider_data.get(
+                    "message",
+                    "",
+                )
+                or (
+                    "Paystack reversed the "
+                    "withdrawal."
+                    if event_name
+                    == "transfer.reversed"
+                    else (
+                        "Paystack reported that "
+                        "the withdrawal failed."
+                    )
+                )
+            )
+            .strip()
+        )
+
+        if (
+            event_name
+            == "transfer.reversed"
+            and previous_status
+            == "paid"
+        ):
+            return (
+                _restore_reversed_paid_withdrawal(
+                    withdrawal=withdrawal,
+                    transaction=transaction,
+                    provider_reference=(
+                        provider_reference
+                    ),
+                    transfer_code=transfer_code,
+                    reason=reason,
+                )
+            )
+
+        result = mark_withdrawal_failed(
+            withdrawal_id=withdrawal.id,
+            reason=reason,
+            commit=False,
+        )
+
+        if not result.get("success"):
+            return result
+
+        if transaction:
+            if provider_reference:
+                transaction.provider_reference = (
+                    provider_reference
+                )
+
+        event_result = record_withdrawal_event(
+            withdrawal,
+            (
+                "payout_reversed"
+                if event_name
+                == "transfer.reversed"
+                else "payout_failed"
+            ),
+            actor_role="provider",
+            previous_status=previous_status,
+            new_status="failed",
+            reason=reason,
+            provider_reference=(
+                provider_reference
+            ),
+            transfer_code=transfer_code,
+            event_metadata={
+                "webhook_event": event_name,
+                "funds_returned": True,
+                "wallet_balance_after_refund": (
+                    result.get(
+                        "wallet_data",
+                        {},
+                    ).get(
+                        "available_balance"
+                    )
+                    if result.get(
+                        "wallet_data"
+                    )
+                    else None
+                ),
+            },
+            notification_title=(
+                "Withdrawal reversed"
+                if event_name
+                == "transfer.reversed"
+                else "Withdrawal failed"
+            ),
+            notification_message=(
+                f"Your {float(withdrawal.amount):.2f} "
+                f"{withdrawal.currency or 'ZAR'} "
+                "withdrawal could not be completed. "
+                "The reserved funds were returned "
+                "to your ServiceFlow wallet."
+            ),
+            commit=False,
+        )
+
+        if not event_result.get(
+            "success"
+        ):
+            return event_result
+
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+            return {
+                "success": False,
+                "message": (
+                    "Unable to finalize the "
+                    "failed withdrawal webhook."
+                ),
+                "status_code": 500,
+            }
+
+        return {
+            "success": True,
+            "message": (
+                "Withdrawal failure webhook "
+                "processed."
+            ),
+            "already_processed": False,
+        }
+
+    return {
+        "success": True,
+        "message": (
+            "Transfer webhook event ignored."
+        ),
+        "ignored": True,
+    }
+
+
+def handle_paystack_webhook_event(
+    payload,
+):
+    """
+    Process supported Paystack webhook events.
+
+    Unknown event types are acknowledged and
+    ignored so Paystack does not retry them.
+    """
+
+    if not isinstance(payload, dict):
+        return {
+            "success": False,
+            "message": (
+                "Webhook payload must be "
+                "a JSON object."
+            ),
+            "status_code": 400,
+        }
+
+    event_name = str(
+        payload.get(
+            "event",
+            "",
+        )
+        or ""
+    ).strip().lower()
+
+    provider_data = (
+        payload.get(
+            "data",
+            {},
+        )
+        or {}
+    )
+
+    if not event_name:
+        return {
+            "success": False,
+            "message": (
+                "Paystack webhook event "
+                "name is required."
+            ),
+            "status_code": 400,
+        }
+
+    if not isinstance(
+        provider_data,
+        dict,
+    ):
+        return {
+            "success": False,
+            "message": (
+                "Paystack webhook data "
+                "must be a JSON object."
+            ),
+            "status_code": 400,
+        }
+
+    if event_name == "charge.success":
+        reference = str(
+            provider_data.get(
+                "reference",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if not reference:
+            return {
+                "success": False,
+                "message": (
+                    "Successful charge webhook "
+                    "does not contain a reference."
+                ),
+                "status_code": 400,
+            }
+
+        result = finalize_verified_payment(
+            reference=reference,
+            provider_data=provider_data,
+            customer_id=None,
+        )
+
+        if result.get("success"):
+            result["event"] = event_name
+
+        return result
+
+    if event_name in {
+        "transfer.success",
+        "transfer.failed",
+        "transfer.reversed",
+    }:
+        result = reconcile_transfer_webhook(
+            event_name=event_name,
+            provider_data=provider_data,
+        )
+
+        if result.get("success"):
+            result["event"] = event_name
+
+        return result
+
+    return {
+        "success": True,
+        "message": (
+            "Paystack webhook event "
+            "acknowledged."
+        ),
+        "event": event_name,
+        "ignored": True,
     }
 
 
@@ -701,7 +1817,7 @@ def verify_payment(
 
     if customer_id is not None:
         try:
-            customer_id = int(
+            parsed_customer_id = int(
                 customer_id,
             )
         except (
@@ -718,7 +1834,7 @@ def verify_payment(
 
         if (
             transaction.customer_id
-            != customer_id
+            != parsed_customer_id
         ):
             return {
                 "success": False,
@@ -728,6 +1844,8 @@ def verify_payment(
                 ),
                 "status_code": 403,
             }
+    else:
+        parsed_customer_id = None
 
     if (
         transaction.status
@@ -772,231 +1890,14 @@ def verify_payment(
             "data",
             {},
         )
+        or {}
     )
 
-    provider_status = str(
-        provider_data.get(
-            "status",
-            "",
-        )
-    ).strip().lower()
-
-    provider_currency = str(
-        provider_data.get(
-            "currency",
-            "",
-        )
-    ).strip().upper()
-
-    provider_amount = from_subunit(
-        provider_data.get(
-            "amount"
-        )
+    return finalize_verified_payment(
+        reference=verify_reference,
+        provider_data=provider_data,
+        customer_id=parsed_customer_id,
     )
-
-    expected_amount = to_money(
-        transaction.amount,
-    )
-
-    expected_currency = (
-        transaction.currency
-        or "ZAR"
-    ).upper()
-
-    if provider_status != "success":
-        return {
-            "success": False,
-            "message": (
-                "The payment has not "
-                "completed successfully."
-            ),
-            "payment_status": (
-                provider_status
-                or "unknown"
-            ),
-            "status_code": 409,
-        }
-
-    if (
-        provider_amount is None
-        or provider_amount
-        != expected_amount
-    ):
-        return {
-            "success": False,
-            "message": (
-                "Payment amount "
-                "verification failed."
-            ),
-            "status_code": 409,
-        }
-
-    if (
-        provider_currency
-        != expected_currency
-    ):
-        return {
-            "success": False,
-            "message": (
-                "Payment currency "
-                "verification failed."
-            ),
-            "status_code": 409,
-        }
-
-    service_request = db.session.get(
-        ServiceRequest,
-        transaction.service_request_id,
-    )
-
-    if not service_request:
-        return {
-            "success": False,
-            "message": (
-                "Linked service request "
-                "was not found."
-            ),
-            "status_code": 404,
-        }
-
-    if (
-        service_request.customer_id
-        != transaction.customer_id
-        or service_request.artisan_id
-        != transaction.artisan_id
-    ):
-        return {
-            "success": False,
-            "message": (
-                "Payment ownership "
-                "verification failed."
-            ),
-            "status_code": 409,
-        }
-
-    wallet_result = (
-        get_or_create_wallet(
-            transaction.artisan_id,
-            commit=False,
-        )
-    )
-
-    if not wallet_result.get(
-        "success"
-    ):
-        return wallet_result
-
-    wallet = (
-        wallet_result["wallet"]
-    )
-
-    pending_balance = (
-        to_money(
-            wallet.pending_balance
-        )
-        or Decimal("0.00")
-    )
-
-    artisan_amount = (
-        to_money(
-            transaction.artisan_amount
-        )
-        or Decimal("0.00")
-    )
-
-    if artisan_amount <= 0:
-        return {
-            "success": False,
-            "message": (
-                "The artisan payment "
-                "amount is invalid."
-            ),
-            "status_code": 500,
-        }
-
-    wallet.pending_balance = float(
-        pending_balance
-        + artisan_amount
-    )
-
-    transaction.status = (
-        "successful"
-    )
-
-    transaction.provider_reference = (
-        str(
-            provider_data.get(
-                "reference"
-            )
-            or verify_reference
-        )
-    )
-
-    transaction.description = (
-        "Paystack payment verified "
-        f"for service request "
-        f"#{service_request.id}."
-    )
-
-    try:
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
-
-        return {
-            "success": False,
-            "message": (
-                "Payment was verified, "
-                "but ServiceFlow could "
-                "not finalize it."
-            ),
-            "status_code": 500,
-        }
-
-    return {
-        "success": True,
-        "message": (
-            "Payment verified "
-            "successfully."
-        ),
-        "already_processed": False,
-        "transaction": (
-            transaction_to_dict(
-                transaction,
-            )
-        ),
-        "wallet": (
-            wallet_to_dict(
-                wallet,
-            )
-        ),
-        "provider": {
-            "reference": (
-                provider_data.get(
-                    "reference"
-                )
-            ),
-            "status": (
-                provider_status
-            ),
-            "amount": float(
-                provider_amount,
-            ),
-            "currency": (
-                provider_currency
-            ),
-            "channel": (
-                provider_data.get(
-                    "channel"
-                )
-            ),
-            "paid_at": (
-                provider_data.get(
-                    "paid_at"
-                )
-            ),
-        },
-    }
 
 
 # ==========================
