@@ -983,17 +983,6 @@ def _restore_reversed_paid_withdrawal(
                 )
             ),
         },
-        notification_title=(
-            "Withdrawal reversed"
-        ),
-        notification_message=(
-            f"Your {float(amount):.2f} "
-            f"{withdrawal.currency or 'ZAR'} "
-            "withdrawal was reversed by "
-            "the payout provider and the "
-            "funds were returned to your "
-            "ServiceFlow wallet."
-        ),
         commit=False,
     )
 
@@ -1101,15 +1090,6 @@ def reconcile_transfer_webhook(
             event_metadata={
                 "webhook_event": event_name,
             },
-            notification_title=(
-                "Withdrawal paid"
-            ),
-            notification_message=(
-                f"Your {float(withdrawal.amount):.2f} "
-                f"{withdrawal.currency or 'ZAR'} "
-                "withdrawal has been paid "
-                "successfully."
-            ),
             commit=False,
         )
 
@@ -1244,19 +1224,6 @@ def reconcile_transfer_webhook(
                     else None
                 ),
             },
-            notification_title=(
-                "Withdrawal reversed"
-                if event_name
-                == "transfer.reversed"
-                else "Withdrawal failed"
-            ),
-            notification_message=(
-                f"Your {float(withdrawal.amount):.2f} "
-                f"{withdrawal.currency or 'ZAR'} "
-                "withdrawal could not be completed. "
-                "The reserved funds were returned "
-                "to your ServiceFlow wallet."
-            ),
             commit=False,
         )
 
