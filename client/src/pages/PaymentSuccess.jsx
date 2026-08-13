@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -34,6 +35,73 @@ function PaymentSuccess() {
     searchParams.get("trxref") ||
     "";
 
+  // ==========================
+  // Verify Payment
+  // ==========================
+
+  const verifyPayment = useCallback(
+    async () => {
+      if (!reference) {
+        setStatus("error");
+
+        setMessage(
+          "No payment reference was provided.",
+        );
+
+        return;
+      }
+
+      try {
+        setStatus("loading");
+
+        setMessage(
+          "Verifying your payment with Paystack...",
+        );
+
+        const data =
+          await paymentService.verifyPayment(
+            reference,
+          );
+
+        if (!data?.success) {
+          setStatus("error");
+
+          setMessage(
+            data?.message ||
+              "Payment verification failed.",
+          );
+
+          return;
+        }
+
+        setPayment(data);
+
+        setStatus("success");
+
+        setMessage(
+          data?.already_processed
+            ? "This payment was already verified successfully."
+            : "Your payment was verified successfully.",
+        );
+      } catch (error) {
+        const response =
+          error?.response?.data;
+
+        setStatus("error");
+
+        setMessage(
+          response?.message ||
+            "Unable to verify your payment.",
+        );
+      }
+    },
+    [reference],
+  );
+
+  // ==========================
+  // Initial Verification
+  // ==========================
+
   useEffect(() => {
     if (hasVerified.current) {
       return;
@@ -41,64 +109,16 @@ function PaymentSuccess() {
 
     hasVerified.current = true;
 
-    verifyPayment();
-  }, []);
+    void verifyPayment();
+  }, [verifyPayment]);
 
-  async function verifyPayment() {
-    if (!reference) {
-      setStatus("error");
+  // ==========================
+  // Retry Verification
+  // ==========================
 
-      setMessage(
-        "No payment reference was provided.",
-      );
-
-      return;
-    }
-
-    try {
-      setStatus("loading");
-
-      setMessage(
-        "Verifying your payment with Paystack...",
-      );
-
-      const data =
-        await paymentService.verifyPayment(
-          reference,
-        );
-
-      if (!data?.success) {
-        setStatus("error");
-
-        setMessage(
-          data?.message ||
-            "Payment verification failed.",
-        );
-
-        return;
-      }
-
-      setPayment(data);
-
-      setStatus("success");
-
-      setMessage(
-        data?.already_processed
-          ? "This payment was already verified successfully."
-          : "Your payment was verified successfully.",
-      );
-    } catch (error) {
-      const response =
-        error?.response?.data;
-
-      setStatus("error");
-
-      setMessage(
-        response?.message ||
-          "Unable to verify your payment.",
-      );
-    }
-  }
+  const handleRetry = () => {
+    void verifyPayment();
+  };
 
   const transaction =
     payment?.transaction || null;
@@ -179,7 +199,7 @@ function PaymentSuccess() {
           <>
             <div style={styles.successNotice}>
               Your payment has been secured.
-              The artisan's earnings remain
+              The artisan&apos;s earnings remain
               pending until the job is
               completed and confirmed.
             </div>
@@ -293,15 +313,7 @@ function PaymentSuccess() {
               {reference && (
                 <button
                   type="button"
-                  onClick={() => {
-                    hasVerified.current =
-                      false;
-
-                    verifyPayment();
-
-                    hasVerified.current =
-                      true;
-                  }}
+                  onClick={handleRetry}
                   style={{
                     ...styles.button,
                     ...styles.primaryButton,

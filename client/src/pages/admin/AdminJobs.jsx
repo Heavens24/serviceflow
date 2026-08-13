@@ -140,13 +140,74 @@ function AdminJobs() {
   );
 
   useEffect(() => {
-    loadJobs(
-      1,
-      appliedFilters,
-    );
+    let cancelled = false;
+
+    const loadInitialJobs = async () => {
+      try {
+        const response =
+          await adminService.getJobs({
+            ...normaliseFilters(
+              appliedFilters,
+            ),
+            page: 1,
+            per_page:
+              pagination.per_page,
+          });
+
+        if (cancelled) {
+          return;
+        }
+
+        setJobs(response.jobs || []);
+
+        setSummary(
+          response.summary || {
+            matching_jobs: 0,
+            matching_value: 0,
+          },
+        );
+
+        setPagination((current) => ({
+          ...current,
+          ...(response.pagination || {}),
+        }));
+
+        setFilterOptions(
+          response.filter_options || {
+            statuses: [],
+            categories: [],
+            locations: [],
+            sorts: [],
+          },
+        );
+
+        setErrorMessage("");
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        setErrorMessage(
+          getErrorMessage(
+            error,
+            "Unable to load jobs.",
+          ),
+        );
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void loadInitialJobs();
+
+    return () => {
+      cancelled = true;
+    };
   }, [
     appliedFilters,
-    loadJobs,
+    pagination.per_page,
   ]);
 
   const refreshCurrentPage = async () => {

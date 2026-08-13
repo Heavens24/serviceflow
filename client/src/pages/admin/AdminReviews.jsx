@@ -134,13 +134,75 @@ function AdminReviews() {
 
 
   useEffect(() => {
-    loadReviews(
-      1,
-      appliedFilters,
-    );
+    let cancelled = false;
+
+    const loadInitialReviews = async () => {
+      try {
+        setLoading(true);
+        setErrorMessage("");
+
+        const response =
+          await adminService.getReviews({
+            ...normaliseFilters(
+              appliedFilters,
+            ),
+            page: 1,
+            per_page:
+              pagination.per_page,
+          });
+
+        if (cancelled) {
+          return;
+        }
+
+        setReviews(
+          response.reviews || [],
+        );
+
+        setSummary(
+          response.summary || {
+            matching_reviews: 0,
+            average_rating: 0,
+            rating_breakdown: {
+              1: 0,
+              2: 0,
+              3: 0,
+              4: 0,
+              5: 0,
+            },
+          },
+        );
+
+        setPagination((current) => ({
+          ...current,
+          ...(response.pagination || {}),
+        }));
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        setErrorMessage(
+          getErrorMessage(
+            error,
+            "Unable to load reviews.",
+          ),
+        );
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void loadInitialReviews();
+
+    return () => {
+      cancelled = true;
+    };
   }, [
     appliedFilters,
-    loadReviews,
+    pagination.per_page,
   ]);
 
 

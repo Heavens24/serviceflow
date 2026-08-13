@@ -1,6 +1,8 @@
+
+
+
 import {
   useEffect,
-  useMemo,
   useState,
 } from "react";
 import {
@@ -86,16 +88,12 @@ function ArtisanProfile() {
     };
   }, [numericUserId]);
 
-  const skills = useMemo(() => {
-    if (!profile?.skills) {
-      return [];
-    }
-
-    return profile.skills
-      .split(",")
-      .map((skill) => skill.trim())
-      .filter(Boolean);
-  }, [profile?.skills]);
+  const skills = profile?.skills
+    ? profile.skills
+        .split(",")
+        .map((skill) => skill.trim())
+        .filter(Boolean)
+    : [];
 
   const isOwnProfile =
     user?.role === "artisan" &&

@@ -105,8 +105,70 @@ function AdminUsers() {
   );
 
   useEffect(() => {
-    loadUsers(1, appliedFilters);
-  }, [appliedFilters, loadUsers]);
+    let cancelled = false;
+
+    const loadInitialUsers = async () => {
+      try {
+        setLoading(true);
+        setErrorMessage("");
+
+        const response =
+          await adminService.getUsers({
+            ...normaliseFilters(
+              appliedFilters,
+            ),
+            page: 1,
+            per_page:
+              pagination.per_page,
+          });
+
+        if (cancelled) {
+          return;
+        }
+
+        setUsers(
+          response.users || [],
+        );
+
+        setPagination((current) => ({
+          ...current,
+          ...(response.pagination || {}),
+        }));
+
+        setFilterOptions(
+          response.filter_options || {
+            roles: [],
+            statuses: [],
+            cities: [],
+          },
+        );
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        setErrorMessage(
+          getErrorMessage(
+            error,
+            "Unable to load users.",
+          ),
+        );
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void loadInitialUsers();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    appliedFilters,
+    pagination.per_page,
+  ]);
 
   const handleFilterChange = (event) => {
     const { name, value } = event.target;

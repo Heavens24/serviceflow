@@ -121,49 +121,108 @@ function Wallet() {
 
   useEffect(() => {
     if (!isArtisan) {
-      setLoading(false);
-      return;
+      return undefined;
     }
 
-    loadWalletData();
-  }, [
-    isArtisan,
-    loadWalletData,
-  ]);
+    let cancelled = false;
 
-  const loadBanks =
-    useCallback(async () => {
-      if (banks.length > 0) {
-        return;
-      }
+    const loadInitialWalletData =
+      async () => {
+        try {
+          const [
+            walletResult,
+            payoutResult,
+            withdrawalResult,
+          ] = await Promise.all([
+            walletService.getWallet(),
+            walletService.getPayoutAccount(),
+            walletService.getWithdrawals({
+              perPage: 50,
+            }),
+          ]);
 
+          if (cancelled) {
+            return;
+          }
+
+          setWallet(
+            walletResult.wallet || null,
+          );
+
+          setPayoutAccount(
+            payoutResult.payout_account ||
+              null,
+          );
+
+          setWithdrawals(
+            withdrawalResult.withdrawals ||
+              [],
+          );
+        } catch (error) {
+          if (!cancelled) {
+            setPageError(
+              getErrorMessage(
+                error,
+                "Unable to load your wallet.",
+              ),
+            );
+          }
+        } finally {
+          if (!cancelled) {
+            setLoading(false);
+            setRefreshing(false);
+          }
+        }
+      };
+
+    void loadInitialWalletData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isArtisan]);
+
+  useEffect(() => {
+    if (
+      !showBankForm ||
+      !isArtisan ||
+      banks.length > 0
+    ) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const fetchBanks = async () => {
       try {
         const result =
           await walletService.getPayoutBanks();
 
-        setBanks(
-          result.banks || [],
-        );
+        if (!cancelled) {
+          setBanks(
+            result.banks || [],
+          );
+        }
       } catch (error) {
-        setPageError(
-          getErrorMessage(
-            error,
-            "Unable to load supported banks.",
-          ),
-        );
+        if (!cancelled) {
+          setPageError(
+            getErrorMessage(
+              error,
+              "Unable to load supported banks.",
+            ),
+          );
+        }
       }
-    }, [banks.length]);
+    };
 
-  useEffect(() => {
-    if (
-      showBankForm &&
-      isArtisan
-    ) {
-      loadBanks();
-    }
+    void fetchBanks();
+
+    return () => {
+      cancelled = true;
+    };
   }, [
+    banks.length,
     isArtisan,
-    loadBanks,
     showBankForm,
   ]);
 

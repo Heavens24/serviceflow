@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import {
   Link,
   NavLink,
-  useLocation,
   useNavigate,
 } from "react-router-dom";
 
@@ -31,7 +30,6 @@ const PUBLIC_LINKS = [
 
 function Navbar() {
   const navigate = useNavigate();
-  const location = useLocation();
   const { user, logout } = useAuth();
 
   const [mobileMenuOpen, setMobileMenuOpen] =
@@ -39,10 +37,16 @@ function Navbar() {
 
   const isAuthenticated = Boolean(user);
 
-  useEffect(() => {
-    setMobileMenuOpen(false);
-  }, [location.pathname]);
+  // ==========================
+  // Mobile Menu Helpers
+  // ==========================
 
+  const closeMobileMenu = () => {
+    setMobileMenuOpen(false);
+  };
+
+  // Close the mobile menu automatically
+  // when the viewport becomes desktop-sized.
   useEffect(() => {
     const handleResize = () => {
       if (window.innerWidth >= 900) {
@@ -63,9 +67,13 @@ function Navbar() {
     };
   }, []);
 
+  // ==========================
+  // Authentication Actions
+  // ==========================
+
   const handleLogout = () => {
     logout();
-    setMobileMenuOpen(false);
+    closeMobileMenu();
 
     navigate("/login", {
       replace: true,
@@ -86,6 +94,7 @@ function Navbar() {
             to="/"
             aria-label="ServiceFlow home"
             style={styles.logo}
+            onClick={closeMobileMenu}
           >
             <span style={styles.logoMark}>
               SF
@@ -95,6 +104,10 @@ function Navbar() {
               ServiceFlow
             </span>
           </Link>
+
+          {/* ==========================
+              Desktop Navigation
+          ========================== */}
 
           <div
             className="serviceflow-navbar-desktop-links"
@@ -158,6 +171,10 @@ function Navbar() {
               </NavLink>
             )}
           </div>
+
+          {/* ==========================
+              Desktop Account Actions
+          ========================== */}
 
           <div
             className="serviceflow-navbar-desktop-actions"
@@ -234,6 +251,10 @@ function Navbar() {
             )}
           </div>
 
+          {/* ==========================
+              Mobile Menu Button
+          ========================== */}
+
           <button
             type="button"
             className="serviceflow-navbar-menu-button"
@@ -280,6 +301,10 @@ function Navbar() {
           </button>
         </div>
 
+        {/* ==========================
+            Mobile Navigation
+        ========================== */}
+
         {mobileMenuOpen && (
           <div style={styles.mobileMenu}>
             <div
@@ -320,6 +345,7 @@ function Navbar() {
                     key={link.to}
                     to={link.to}
                     end={link.end}
+                    onClick={closeMobileMenu}
                     style={({ isActive }) => ({
                       ...styles.mobileLink,
                       ...(isActive
@@ -331,11 +357,16 @@ function Navbar() {
                   </NavLink>
                 ))}
 
+                {/* ==========================
+                    Customer Mobile Links
+                ========================== */}
+
                 {user?.role ===
                   "customer" && (
                   <>
                     <NavLink
                       to="/booking"
+                      onClick={closeMobileMenu}
                       style={({ isActive }) => ({
                         ...styles.mobileLink,
                         ...(isActive
@@ -348,6 +379,7 @@ function Navbar() {
 
                     <NavLink
                       to="/my-requests"
+                      onClick={closeMobileMenu}
                       style={({ isActive }) => ({
                         ...styles.mobileLink,
                         ...(isActive
@@ -360,6 +392,7 @@ function Navbar() {
 
                     <NavLink
                       to="/customer-profile"
+                      onClick={closeMobileMenu}
                       style={({ isActive }) => ({
                         ...styles.mobileLink,
                         ...(isActive
@@ -372,6 +405,7 @@ function Navbar() {
 
                     <NavLink
                       to="/notifications"
+                      onClick={closeMobileMenu}
                       style={({ isActive }) => ({
                         ...styles.mobileLink,
                         ...(isActive
@@ -384,11 +418,16 @@ function Navbar() {
                   </>
                 )}
 
+                {/* ==========================
+                    Artisan Mobile Links
+                ========================== */}
+
                 {user?.role ===
                   "artisan" && (
                   <>
                     <NavLink
                       to="/marketplace"
+                      onClick={closeMobileMenu}
                       style={({ isActive }) => ({
                         ...styles.mobileLink,
                         ...(isActive
@@ -401,6 +440,7 @@ function Navbar() {
 
                     <NavLink
                       to="/my-jobs"
+                      onClick={closeMobileMenu}
                       style={({ isActive }) => ({
                         ...styles.mobileLink,
                         ...(isActive
@@ -413,6 +453,7 @@ function Navbar() {
 
                     <NavLink
                       to="/wallet"
+                      onClick={closeMobileMenu}
                       style={({ isActive }) => ({
                         ...styles.mobileLink,
                         ...(isActive
@@ -425,6 +466,7 @@ function Navbar() {
 
                     <NavLink
                       to="/artisan-profile"
+                      onClick={closeMobileMenu}
                       style={({ isActive }) => ({
                         ...styles.mobileLink,
                         ...(isActive
@@ -437,6 +479,7 @@ function Navbar() {
 
                     <NavLink
                       to="/notifications"
+                      onClick={closeMobileMenu}
                       style={({ isActive }) => ({
                         ...styles.mobileLink,
                         ...(isActive
@@ -450,6 +493,10 @@ function Navbar() {
                 )}
               </div>
 
+              {/* ==========================
+                  Mobile Account Actions
+              ========================== */}
+
               <div style={styles.mobileActions}>
                 {isAuthenticated ? (
                   <>
@@ -457,6 +504,7 @@ function Navbar() {
                       to="/dashboard"
                       variant="secondary"
                       fullWidth
+                      onClick={closeMobileMenu}
                     >
                       Dashboard
                     </Button>
@@ -464,6 +512,7 @@ function Navbar() {
                     <Button
                       to={primaryAction.to}
                       fullWidth
+                      onClick={closeMobileMenu}
                     >
                       {primaryAction.label}
                     </Button>
@@ -483,6 +532,7 @@ function Navbar() {
                       to="/login"
                       variant="secondary"
                       fullWidth
+                      onClick={closeMobileMenu}
                     >
                       Log in
                     </Button>
@@ -490,6 +540,7 @@ function Navbar() {
                     <Button
                       to="/register"
                       fullWidth
+                      onClick={closeMobileMenu}
                     >
                       Join ServiceFlow
                     </Button>
@@ -503,6 +554,11 @@ function Navbar() {
     </header>
   );
 }
+
+
+// ==========================
+// Primary Role Action
+// ==========================
 
 function getPrimaryAction(user) {
   if (!user) {
@@ -525,6 +581,11 @@ function getPrimaryAction(user) {
   };
 }
 
+
+// ==========================
+// Display Helpers
+// ==========================
+
 function getInitials(fullName) {
   if (!fullName) {
     return "SF";
@@ -540,6 +601,7 @@ function getInitials(fullName) {
     .join("");
 }
 
+
 function formatRole(role) {
   if (!role) {
     return "Member";
@@ -550,6 +612,11 @@ function formatRole(role) {
     role.slice(1)
   );
 }
+
+
+// ==========================
+// Styles
+// ==========================
 
 const styles = {
   header: {
@@ -809,6 +876,11 @@ const styles = {
       "1px solid var(--sf-border)",
   },
 };
+
+
+// ==========================
+// Responsive Styles
+// ==========================
 
 const responsiveStyles = `
   @media (max-width: 1080px) {

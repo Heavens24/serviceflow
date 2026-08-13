@@ -4,33 +4,66 @@ import { Link } from "react-router-dom";
 import notificationService from "../services/notificationService";
 
 function Notifications() {
-  const [notifications, setNotifications] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState("");
+  const [notifications, setNotifications] =
+    useState([]);
 
-  const loadNotifications = async () => {
-    try {
-      setLoading(true);
+  const [loading, setLoading] =
+    useState(true);
 
-      const result =
-        await notificationService.getNotifications();
+  const [message, setMessage] =
+    useState("");
 
-      if (result.success) {
-        setNotifications(result.notifications);
-      }
-    } catch (error) {
-      console.error(error);
-      setMessage("Unable to load notifications.");
-    } finally {
-      setLoading(false);
-    }
-  };
+  // ==========================
+  // Initial Load
+  // ==========================
 
   useEffect(() => {
-    loadNotifications();
+    let cancelled = false;
+
+    const fetchNotifications =
+      async () => {
+        try {
+          const result =
+            await notificationService.getNotifications();
+
+          if (cancelled) {
+            return;
+          }
+
+          if (result.success) {
+            setNotifications(
+              result.notifications || [],
+            );
+          }
+        } catch (error) {
+          console.error(error);
+
+          if (!cancelled) {
+            setMessage(
+              "Unable to load notifications.",
+            );
+          }
+        } finally {
+          if (!cancelled) {
+            setLoading(false);
+          }
+        }
+      };
+
+    void fetchNotifications();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const markAsRead = async (notificationId) => {
+  // ==========================
+  // Mark One As Read
+  // ==========================
+
+  const markAsRead = async (
+    notificationId,
+  ) => {
     try {
       const result =
         await notificationService.markAsRead(
@@ -40,7 +73,8 @@ function Notifications() {
       if (result.success) {
         setNotifications((previous) =>
           previous.map((notification) =>
-            notification.id === notificationId
+            notification.id ===
+            notificationId
               ? {
                   ...notification,
                   is_read: true,
@@ -54,6 +88,10 @@ function Notifications() {
     }
   };
 
+  // ==========================
+  // Mark All As Read
+  // ==========================
+
   const markAllAsRead = async () => {
     try {
       const result =
@@ -61,16 +99,22 @@ function Notifications() {
 
       if (result.success) {
         setNotifications((previous) =>
-          previous.map((notification) => ({
-            ...notification,
-            is_read: true,
-          })),
+          previous.map(
+            (notification) => ({
+              ...notification,
+              is_read: true,
+            }),
+          ),
         );
       }
     } catch (error) {
       console.error(error);
     }
   };
+
+  // ==========================
+  // Loading State
+  // ==========================
 
   if (loading) {
     return (
@@ -79,6 +123,10 @@ function Notifications() {
       </main>
     );
   }
+
+  // ==========================
+  // Page
+  // ==========================
 
   return (
     <main style={styles.page}>
@@ -90,8 +138,9 @@ function Notifications() {
             </h1>
 
             <p style={styles.subtitle}>
-              Stay updated with everything happening
-              in your ServiceFlow account.
+              Stay updated with everything
+              happening in your ServiceFlow
+              account.
             </p>
           </div>
 
@@ -104,8 +153,12 @@ function Notifications() {
             </Link>
 
             <button
+              type="button"
               onClick={markAllAsRead}
               style={styles.primaryButton}
+              disabled={
+                notifications.length === 0
+              }
             >
               Mark all as read
             </button>
@@ -123,50 +176,67 @@ function Notifications() {
             <h3>No notifications</h3>
 
             <p>
-              New updates about your jobs will appear
-              here.
+              New updates about your jobs
+              will appear here.
             </p>
           </div>
         ) : (
-          notifications.map((notification) => (
-            <div
-              key={notification.id}
-              style={{
-                ...styles.card,
-                backgroundColor:
-                  notification.is_read
-                    ? "#ffffff"
-                    : "#eff6ff",
-              }}
-            >
-              <div>
-                <h3 style={styles.cardTitle}>
-                  {notification.title}
-                </h3>
+          notifications.map(
+            (notification) => (
+              <div
+                key={notification.id}
+                style={{
+                  ...styles.card,
+                  backgroundColor:
+                    notification.is_read
+                      ? "#ffffff"
+                      : "#eff6ff",
+                }}
+              >
+                <div>
+                  <h3
+                    style={
+                      styles.cardTitle
+                    }
+                  >
+                    {notification.title}
+                  </h3>
 
-                <p style={styles.cardMessage}>
-                  {notification.message}
-                </p>
+                  <p
+                    style={
+                      styles.cardMessage
+                    }
+                  >
+                    {notification.message}
+                  </p>
 
-                <small style={styles.date}>
-                  {new Date(
-                    notification.created_at,
-                  ).toLocaleString()}
-                </small>
+                  <small
+                    style={styles.date}
+                  >
+                    {new Date(
+                      notification.created_at,
+                    ).toLocaleString()}
+                  </small>
+                </div>
+
+                {!notification.is_read && (
+                  <button
+                    type="button"
+                    style={
+                      styles.readButton
+                    }
+                    onClick={() =>
+                      markAsRead(
+                        notification.id,
+                      )
+                    }
+                  >
+                    Mark as read
+                  </button>
+                )}
               </div>
-
-              {!notification.is_read && (
-                <button
-                  style={styles.readButton}
-                  onClick={() =>
-                    markAsRead(notification.id)
-                  }
-                >
-                  Mark as read
-                </button>
-              )}
-            </div>
-          ))
+            ),
+          )
         )}
       </div>
     </main>
