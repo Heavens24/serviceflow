@@ -173,9 +173,7 @@ def apply_security_headers(
 
     response.headers[
         "Cache-Control"
-    ] = (
-        "no-store"
-    )
+    ] = "no-store"
 
     if app.config.get(
         "ENABLE_HSTS",
@@ -190,6 +188,55 @@ def apply_security_headers(
         )
 
     return response
+
+
+# ==========================
+# JWT Token Verification
+# ==========================
+
+@jwt.token_verification_loader
+def verify_active_user_token(
+    jwt_header,
+    jwt_payload,
+):
+    """
+    Reject otherwise-valid JWTs when the
+    account behind the token no longer exists
+    or is no longer active.
+
+    This protects all routes using
+    @jwt_required() centrally.
+    """
+
+    identity = jwt_payload.get(
+        "sub",
+    )
+
+    try:
+        user_id = int(identity)
+    except (
+        TypeError,
+        ValueError,
+    ):
+        return False
+
+    user = db.session.get(
+        User,
+        user_id,
+    )
+
+    if not user:
+        return False
+
+    return (
+        str(
+            user.status
+            or ""
+        )
+        .strip()
+        .lower()
+        == "active"
+    )
 
 
 # ==========================
@@ -270,8 +317,8 @@ def token_verification_failed_callback(
     return {
         "success": False,
         "message": (
-            "Authentication-token "
-            "verification failed."
+            "Your account is unavailable "
+            "or is no longer active."
         ),
     }, 401
 
